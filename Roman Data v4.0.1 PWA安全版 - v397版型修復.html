@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
+</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#fafaf9">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Roman Data v4.0.1 PWA安全版 - v397版型修復</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{
+  /* v397 同款安全區處理 - 防止加入主畫面被瀏海切掉 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  min-height: calc(100% + env(safe-area-inset-top));
+  min-height: -webkit-fill-available;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","Microsoft JhengHei",sans-serif;
+  background:#fafaf9;color:#18181b;line-height:1.5;
+  -webkit-tap-highlight-color:transparent;
+  overflow-x:hidden;
+  width:100%;
+  max-width:100vw;
+  min-height:100dvh;
+  min-height:-webkit-fill-available;
+  /* 防止右側被切 - v397 關鍵 */
+  position:relative;
+}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.header{
+  position:sticky;
+  top:0;
+  top: env(safe-area-inset-top);
+  z-index:30;
+  background:rgba(255,255,255,0.9);
+  backdrop-filter:blur(20px);
+  border-bottom:1px solid #e4e4e7;
+  /* v397 同款 - header 也要吃安全區 */
+  padding-top: env(safe-area-inset-top);
+  width:100%;
+  max-width:100vw;
+  overflow:hidden;
+}
+.container{
+  max-width:1200px;
+  margin:0 auto;
+  /* v397 同款 - 用 max() 確保安全區+原始padding */
+  padding:12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+  width:100%;
+  box-sizing:border-box;
+}
+@media(min-width:768px){.container{padding:16px max(24px, env(safe-area-inset-right)) 16px max(24px, env(safe-area-inset-left))}}
+.title{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-weight:700;font-size:22px}
+@media(min-width:768px){.title{font-size:28px}}
+.badge{font-size:10px;font-family:monospace;padding:3px 8px;border-radius:999px;border:1px solid;white-space:nowrap}
+.badge-amber{background:#fef3c7;border-color:#fde68a;color:#92400e}
+.badge-blue{background:#eff6ff;border-color:#bfdbfe;color:#1e40af}
+.badge-emerald{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+.badge-zinc{background:#f4f4f5;border-color:#e4e4e7;color:#52525b}
+.badge-dark{background:#18181b;color:#fff;border-color:#18181b}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.card{background:#fff;border:1px solid #e4e4e7;border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,0.05)}
+@media(min-width:768px){.card{border-radius:20px;padding:20px}}
+.grid-main{display:grid;grid-template-columns:1fr;gap:16px}
+@media(min-width:1024px){.grid-main{grid-template-columns:380px 1fr;gap:24px}}
+.textarea{width:100%;height:200px;background:#fafafa;border:1px solid #e4e4e7;border-radius:12px;padding:12px;font-size:11px;font-family:monospace;line-height:1.5;outline:none;resize:none}
+@media(min-width:768px){.textarea{height:240px}}
+.textarea:focus{border-color:#18181b;box-shadow:0 0 0 2px rgba(24,24,27,0.1)}
+.btn{height:48px;border-radius:12px;border:none;font-size:13px;font-weight:500;cursor:pointer;transition:transform 0.1s,background 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;touch-action:manipulation}
+@media(min-width:768px){.btn{height:40px;font-size:12px}}
+.btn:active{transform:scale(0.98)}
+.btn-dark{background:#18181b;color:#fff}
+.btn-dark:active{background:#000}
+.btn-green{background:#06C755;color:#fff}
+.btn-white{background:#fff;border:1px solid #e4e4e7;color:#18181b}
+.btn-white-bold{background:#fff;border:2px solid #18181b;color:#18181b;font-weight:700}
+.input{width:100%;height:44px;background:#fafafa;border:1px solid #e4e4e7;border-radius:12px;padding:0 40px 0 16px;font-size:14px;outline:none}
+@media(min-width:768px){.input{height:40px;font-size:13px}}
+.input:focus{border-color:#18181b;box-shadow:0 0 0 2px rgba(24,24,27,0.1)}
+.filter-wrap{position:relative;overflow:hidden}
+.filter-scroll{display:flex;gap:8px;overflow-x:auto;padding:0 4px 4px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.filter-scroll::-webkit-scrollbar{display:none}
+.filter-btn{height:40px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;white-space:nowrap;border:1px solid #e4e4e7;background:#fff;color:#52525b;cursor:pointer;flex-shrink:0;touch-action:manipulation;transition:all 0.2s}
+@media(min-width:768px){.filter-btn{height:32px;padding:0 14px;font-size:12px}}
+.filter-btn:active{transform:scale(0.95)}
+.filter-btn.active{background:#18181b;color:#fff;border-color:#18181b;box-shadow:0 1px 3px rgba(0,0,0,0.2)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.stat{background:#fafafa;border:1px solid #f4f4f5;border-radius:10px;padding:8px;text-align:center}
+.stat-emerald{background:#ecfdf5;border-color:#d1fae5}
+.stat-label{font-size:10px;color:#71717a}
+.stat-value{font-size:14px;font-weight:700;margin-top:2px}
+.teacher-card{background:#fff;border:1px solid #e4e4e7;border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,0.05)}
+@media(min-width:768px){.teacher-card{border-radius:20px;padding:20px}}
+.booking-row{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border-radius:10px;font-size:12px;margin-bottom:6px}
+.booking-filled{background:#18181b;color:#fff}
+.booking-empty{background:#fff;border:1px dashed #d4d4d8;color:#a1a1aa}
+.log{height:120px;overflow-y:auto;background:#fafafa;border:1px solid #f4f4f5;border-radius:10px;padding:8px;font-size:10px;font-family:monospace}
+@media(min-width:768px){.log{height:140px}}
+.log-item{display:flex;gap:8px;margin-bottom:4px}
+.version-bar{background:#18181b;color:#fff;padding:8px 12px;border-radius:12px;display:flex;flex-direction:column;gap:4px;font-size:10px;font-family:monospace}
+@media(min-width:768px){.version-bar{flex-direction:row;justify-content:space-between;align-items:center}}
+.safe-bottom{height:env(safe-area-inset-bottom)}
+
+/* === v397 修復 - 加入主畫面不被切掉的關鍵 === */
+.card, .teacher-card {
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  overflow:hidden;
+  /* 防止卡片陰影被切，但內容不超出 */
+  overflow-wrap:break-word;
+  word-break:break-word;
+}
+.grid-main {
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+}
+/* 按鈕區 - v397 用 grid 不會被切 */
+.btn {
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  word-break:keep-all;
+}
+/* textarea 和 input 也不超出 */
+.textarea, .input {
+  max-width:100%;
+  box-sizing:border-box;
+}
+/* filter 橫向滑動區 - 防止撐開 */
+.filter-wrap {
+  max-width:100%;
+  overflow:hidden;
+}
+.filter-scroll {
+  max-width:100%;
+  box-sizing:border-box;
+}
+/* version-bar 也要安全 */
+.version-bar {
+  max-width:100%;
+  box-sizing:border-box;
+  overflow:hidden;
+}
+
+</style>
+<script>
+const WORKER_URL = 'https://roman-schedule.yunyunspa.workers.dev';
+const WORKER_BACKUP_URL = 'https://roman-schedule-worker.yunyunspa.workers.dev';
+function safeGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function safeSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+async function fetchWorkerSchedule(){
+  const urls = [WORKER_URL + '/api/schedule', WORKER_BACKUP_URL + '/api/schedule'];
+  for(let url of urls){
+    try{
+      const res = await fetch(url + '?t=' + Date.now(), {method:'GET', cache:'no-store', mode:'cors'});
+      if(!res.ok) continue;
+      const data = await res.json();
+      if(data && data.raw_text && data.raw_text.length > 10) return data;
+    }catch(e){ console.log('fetch fail', e.message); }
+  }
+  return null;
+}
+async function pushWorkerSchedule(raw_text){
+  const urls = [WORKER_URL + '/api/schedule', WORKER_BACKUP_URL + '/api/schedule'];
+  for(let url of urls){
+    try{
+      const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, mode:'cors', body: JSON.stringify({raw_text, source:'roman_v399_pwa_safe', updated_by:'roman_site'})});
+      const data = await res.json();
+      if(data && data.success) return data;
+    }catch(e){ console.log('push fail', e.message); }
+  }
+  return null;
+}
+</script>
+</head>
+<body>
+<div class="header">
+  <div class="container">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="title">
+        <span>📦 Roman Data</span>
+        <span class="badge badge-amber">v4.0.1 PWA安全</span>
+        <span class="badge badge-blue">LINE + D1</span>
+      </div>
+      <div style="font-size:11px;color:#71717a">接龍制・22位老師・日進 / 太原 / 日新 / 忠誠 / 大連 / 南屯・Chrome相容版</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div id="syncStatus" class="badge badge-amber" style="padding:6px 12px">● 檢查 D1 連線...</div>
+        <div id="tabCount" class="badge badge-zinc" style="padding:6px 12px">1 個分頁</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container" style="padding-top:8px;padding-bottom:0">
+  <div class="version-bar">
+    <span>版本：v4.0.1-pwa-safe-github・v397版型・PWA不切版・D1直連</span>
+    <span id="d1LiveBadge" style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.3);color:#fcd34d;padding:2px 8px;border-radius:999px">● D1 檢查中...</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="grid-main">
+    <div>
+      <div class="card">
+        <div style="font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <span>🔄 即時同步控制</span>
+          <span class="badge badge-dark" style="font-size:10px">Chrome相容</span>
+        </div>
+        
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;color:#71717a;margin-bottom:6px;font-family:monospace">班表文字（你喜歡的格式）</div>
+          <textarea id="scheduleInput" class="textarea" placeholder="小野11-19太原407&#10;11 K&#10;..."></textarea>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <button id="btnSyncD1" class="btn btn-dark">💾 同步到 D1</button>
+          <button id="btnReloadWorker" class="btn btn-white-bold">🔄 從 D1 載入</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <button id="btnReload" class="btn btn-white">🔄 重新整理</button>
+          <button id="btnCopy" class="btn btn-white">📋 複製</button>
+        </div>
+
+        <div style="border-top:1px solid #f4f4f5;padding-top:12px">
+          <div style="font-size:11px;color:#71717a;margin-bottom:8px;display:flex;justify-content:space-between">
+            <span>同步日誌</span>
+            <span id="workerBadge" class="badge badge-zinc">檢查中...</span>
+          </div>
+          <div id="syncLog" class="log"><div style="color:#a1a1aa">等待同步... 正在連接 Worker D1</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" style="margin-bottom:16px">
+        <div style="position:relative;margin-bottom:12px">
+          <input id="searchInput" class="input" type="text" placeholder="搜尋老師 / 客戶">
+          <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#a1a1aa">🔍</span>
+        </div>
+        
+        <div class="filter-wrap">
+          <div id="filterTabs" class="filter-scroll"></div>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="stat-label">老師</div><div id="statTeachers" class="stat-value">0</div></div>
+          <div class="stat"><div class="stat-label">預約</div><div id="statBookings" class="stat-value">0</div></div>
+          <div class="stat stat-emerald"><div class="stat-label" style="color:#065f46">空檔</div><div id="statEmpty" class="stat-value" style="color:#065f46">0</div></div>
+        </div>
+      </div>
+
+      <div id="scheduleDisplay" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="safe-bottom"></div>
+
+<script>
+const LOCATIONS = ["全部","日進","太原","日新","忠誠","大連","南屯"];
+let currentFilter = "全部";
+let searchQuery = "";
+
+function parseSchedule(text){
+  const blocks = text.split(/-{3,}/).map(b=>b.trim()).filter(Boolean);
+  const result = [];
+  for(let block of blocks){
+    const lines = block.split('\n').map(l=>l.trim()).filter(Boolean);
+    if(!lines.length) continue;
+    const first = lines[0];
+    const m = first.match(/^(.+?)(\d{1,2})(?:[:：]?\d{0,2})?[-—](\d{1,2})(.+)?$/);
+    if(!m) continue;
+    const name = m[1].trim();
+    const start = parseInt(m[2]);
+    const end = parseInt(m[3]);
+    const location = (m[4]||'').trim();
+    const bookings = [];
+    for(let i=1;i<lines.length;i++){
+      const line = lines[i];
+      const bm = line.match(/^(\d{1,2})(?::?(\d{0,2}))?\s*(.+)?$/);
+      if(bm){
+        const hour = parseInt(bm[1]);
+        const customer = (bm[3]||'').trim();
+        if(customer) bookings.push({hour, customer});
+      }else if(line){
+        bookings.push({hour: null, customer: line});
+      }
+    }
+    result.push({name, start, end, location, bookings, raw: block});
+  }
+  return result;
+}
+
+function renderSchedule(){
+  const text = document.getElementById('scheduleInput').value;
+  const data = parseSchedule(text);
+  const display = document.getElementById('scheduleDisplay');
+  const q = searchQuery.toLowerCase();
+  let filtered = data;
+  if(currentFilter !== "全部"){
+    filtered = filtered.filter(d => d.location.includes(currentFilter) || d.raw.includes(currentFilter));
+  }
+  if(q){
+    filtered = filtered.filter(d => d.name.toLowerCase().includes(q) || d.bookings.some(b=>b.customer.toLowerCase().includes(q)));
+  }
+  document.getElementById('statTeachers').textContent = filtered.length;
+  const totalBookings = filtered.reduce((s,d)=>s+d.bookings.length,0);
+  document.getElementById('statBookings').textContent = totalBookings;
+  const totalSlots = filtered.reduce((s,d)=>{
+    let slots = 0;
+    if(d.start && d.end){ slots = d.end >= d.start ? d.end - d.start + 1 : (24 - d.start + d.end + 1); }
+    return s + Math.max(slots, d.bookings.length);
+  },0);
+  document.getElementById('statEmpty').textContent = Math.max(0, totalSlots - totalBookings);
+
+  if(!filtered.length){
+    display.innerHTML = `<div class="card" style="text-align:center;color:#71717a;padding:32px">沒有符合的班表</div>`;
+    return;
+  }
+
+  display.innerHTML = filtered.map(t=>{
+    const locBadge = t.location ? `<span class="badge badge-dark" style="font-size:10px">${t.location}</span>` : '';
+    const timeBadge = (t.start!==undefined) ? `<span class="badge badge-zinc" style="font-size:10px">${t.start}-${t.end}</span>` : '';
+    return `<div class="teacher-card">
+      <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:12px">
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+            <h3 style="font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</h3>
+            ${locBadge}${timeBadge}
+          </div>
+          <div style="font-size:11px;color:#71717a;margin-top:4px;font-family:monospace">${t.bookings.length} 筆預約</div>
+        </div>
+        <div style="width:32px;height:32px;border-radius:50%;background:#18181b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${t.bookings.length}</div>
+      </div>
+      <div>
+        ${t.bookings.length===0 ? '<div style="text-align:center;color:#a1a1aa;padding:8px;border:1px dashed #e4e4e7;border-radius:10px;font-size:12px">今日無預約</div>' : t.bookings.map(b=>{
+          const has = b.customer && b.customer.trim();
+          return `<div class="booking-row ${has?'booking-filled':'booking-empty'}">
+            <span style="font-family:monospace;width:40px;flex-shrink:0">${b.hour!=null?b.hour+':00':'—'}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${has?b.customer:'空檔'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  const tabsEl = document.getElementById('filterTabs');
+  tabsEl.innerHTML = LOCATIONS.map(loc=>{
+    const active = currentFilter===loc;
+    return `<button data-loc="${loc}" class="filter-btn ${active?'active':''}">${loc}</button>`;
+  }).join('');
+  tabsEl.querySelectorAll('button').forEach(btn=>{
+    btn.onclick=()=>{currentFilter=btn.dataset.loc; renderSchedule(); btn.scrollIntoView({behavior:'smooth', inline:'center', block:'nearest'});};
+  });
+}
+
+function logSync(msg, source="系統"){
+  const logEl = document.getElementById('syncLog');
+  if(!logEl) return;
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = 'log-item';
+  div.innerHTML = `<span style="color:#a1a1aa">${time}</span><span style="color:#18181b;font-weight:500">${source}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${msg}</span>`;
+  logEl.prepend(div);
+  while(logEl.children.length>20) logEl.removeChild(logEl.lastChild);
+}
+
+async function init(){
+  const badge = document.getElementById('workerBadge');
+  const status = document.getElementById('syncStatus');
+  const liveBadge = document.getElementById('d1LiveBadge');
+  try{
+    if(badge) badge.textContent = '載入 Worker D1...';
+    if(status) status.textContent = '● 連接 D1 中...';
+    logSync('正在連接 Worker D1...', '系統');
+    const data = await fetchWorkerSchedule();
+    if(data && data.raw_text){
+      document.getElementById('scheduleInput').value = data.raw_text;
+      safeSet('roman_schedule_raw', data.raw_text);
+      logSync('✅ 已從 Worker D1 載入 '+data.raw_text.length+' 字', 'Worker D1');
+      if(badge){ badge.textContent = '✅ D1 已綁定 '+data.raw_text.length+' 字'; badge.className='badge badge-emerald'; }
+      if(status){ status.textContent = '● 已同步 D1 '+new Date().toLocaleTimeString(); status.className='badge badge-emerald'; status.style.padding='6px 12px'; }
+      if(liveBadge){ liveBadge.textContent = '● D1 已連接 '+data.raw_text.length+' 字'; liveBadge.style.background='rgba(16,185,129,0.2)'; liveBadge.style.borderColor='rgba(16,185,129,0.3)'; liveBadge.style.color='#6ee7b7'; }
+    }else{
+      const saved = safeGet('roman_schedule_raw');
+      if(saved && saved.length>100){
+        document.getElementById('scheduleInput').value = saved;
+        logSync('從本地載入 '+saved.length+' 字', '本地');
+      }
+      if(badge){ badge.textContent = '⚠️ Worker 無資料'; badge.className='badge badge-amber'; }
+    }
+  }catch(e){
+    logSync('初始化錯誤: '+e.message, '錯誤');
+    if(badge){ badge.textContent = '❌ 連接失敗'; }
+    const saved = safeGet('roman_schedule_raw');
+    if(saved) document.getElementById('scheduleInput').value = saved;
+  }
+  renderSchedule();
+
+  document.getElementById('btnSyncD1').onclick = async ()=>{
+    const text = document.getElementById('scheduleInput').value;
+    const btn = document.getElementById('btnSyncD1');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '⏳ 同步中...'; btn.disabled=true;
+    try{
+      safeSet('roman_schedule_raw', text);
+      logSync('正在同步到 Worker D1...', '手動');
+      const result = await pushWorkerSchedule(text);
+      if(result && result.success){
+        logSync('✅ 已同步 '+text.length+' 字', '手動');
+        document.getElementById('syncStatus').textContent = '● 已同步 D1 '+new Date().toLocaleTimeString();
+        renderSchedule();
+      }else{ logSync('❌ 同步失敗', '錯誤'); }
+    }catch(e){ logSync('失敗: '+e.message, '錯誤'); }
+    finally{ btn.innerHTML=orig; btn.disabled=false; }
+  };
+  document.getElementById('btnReloadWorker').onclick = async ()=>{
+    const btn = document.getElementById('btnReloadWorker');
+    const orig = btn.innerHTML;
+    btn.innerHTML='⏳ 載入中...';
+    try{
+      const data = await fetchWorkerSchedule();
+      if(data && data.raw_text){
+        document.getElementById('scheduleInput').value = data.raw_text;
+        safeSet('roman_schedule_raw', data.raw_text);
+        logSync('✅ 已重新載入 '+data.raw_text.length+' 字', 'Worker D1');
+        renderSchedule();
+      }
+    }catch(e){ logSync('載入失敗: '+e.message, '錯誤'); }
+    finally{ btn.innerHTML=orig; }
+  };
+  document.getElementById('btnReload').onclick = ()=>location.reload();
+  document.getElementById('btnCopy').onclick = async ()=>{
+    try{ await navigator.clipboard.writeText(document.getElementById('scheduleInput').value); logSync('已複製', '系統'); }catch{ logSync('複製失敗', '錯誤'); }
+  };
+  document.getElementById('scheduleInput').addEventListener('input', ()=>{ renderSchedule(); document.getElementById('syncStatus').textContent='○ 未同步'; document.getElementById('syncStatus').className='badge badge-amber'; document.getElementById('syncStatus').style.padding='6px 12px'; });
+  document.getElementById('searchInput').addEventListener('input', (e)=>{ searchQuery=e.target.value; renderSchedule(); });
+}
+init();
+</script>
+<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
+</html>
