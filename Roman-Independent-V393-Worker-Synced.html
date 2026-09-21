@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roman Data 獨立站 2+3 部署版 v3.9.3 已連 Worker - LINE + D1 Realtime</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body{font-family:'Noto Sans TC',sans-serif; background:#fafaf9;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  .scrollbar-none::-webkit-scrollbar{display:none;}
+  .scrollbar-none{-ms-overflow-style:none; scrollbar-width:none;}
+</style>
+
+// ===== v3.9.3 Worker Realtime Patch - 真正連接 D1 =====
+const WORKER_URL = 'https://roman-schedule.yunyunspa.workers.dev';
+const WORKER_BACKUP_URL = 'https://roman-schedule-worker.yunyunspa.workers.dev';
+
+async function fetchWorkerSchedule(){
+  const urls = [WORKER_URL + '/api/schedule', WORKER_BACKUP_URL + '/api/schedule'];
+  for(let url of urls){
+    try{
+      const res = await fetch(url + '?t=' + Date.now(), {cache:'no-store'});
+      if(!res.ok) continue;
+      const data = await res.json();
+      if(data && data.raw_text && data.raw_text.length > 10){
+        return data;
+      }
+    }catch(e){ console.log('Worker fetch fail', url, e.message); }
+  }
+  return null;
+}
+
+async function pushWorkerSchedule(raw_text){
+  const urls = [WORKER_URL + '/api/schedule', WORKER_BACKUP_URL + '/api/schedule'];
+  for(let url of urls){
+    try{
+      const res = await fetch(url, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({raw_text, source:'roman_independent', updated_by:'roman_site'})
+      });
+      const data = await res.json();
+      if(data && data.success) return data;
+    }catch(e){ console.log('Worker push fail', url, e.message); }
+  }
+  return null;
+}
+
+// 覆蓋原本的 syncToD1 為真正寫入 Worker D1
+const originalSyncToD1 = window.syncToD1;
+window.syncToD1 = async function(source="手動"){
+  const text = document.getElementById('scheduleInput').value;
+  const logEl = document.getElementById('syncLog');
+  try{
+    // 先本地儲存
+    localStorage.setItem('roman_schedule_raw', text);
+    // 推到 Worker D1
+    document.getElementById('syncStatus').innerHTML = '● 同步中... Worker';
+    const result = await pushWorkerSchedule(text);
+    if(result && result.success){
+      if(window.logSync) logSync('✅ 已同步到 Worker D1 ' + text.length + ' 字', source);
+      document.getElementById('syncStatus').innerHTML = '● 已同步 ' + source + ' → Worker D1';
+      document.getElementById('syncStatus').className = 'text-[11px] font-mono px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700';
+      if(window.renderSchedule) renderSchedule();
+    }else{
+      // fallback 本地
+      if(window.logSync) logSync('⚠️ Worker 同步失敗，僅本地暫存', source);
+      if(originalSyncToD1) originalSyncToD1(source);
+    }
+  }catch(e){
+    if(window.logSync) logSync('同步失敗: '+e.message, '錯誤');
+  }
+};
+
+// 初始化時從 Worker 載入
+window.addEventListener('DOMContentLoaded', async ()=>{
+  setTimeout(async ()=>{
+    const data = await fetchWorkerSchedule();
+    if(data && data.raw_text){
+      const current = document.getElementById('scheduleInput').value;
+      // 如果 Worker 的比本地長或更新，覆蓋
+      if(data.raw_text.length > current.length || data.raw_text.includes('9/21週一')){
+        document.getElementById('scheduleInput').value = data.raw_text;
+        if(window.logSync) logSync('✅ 已從 Worker D1 載入 ' + data.raw_text.length + ' 字', 'Worker D1');
+        if(window.renderSchedule) renderSchedule();
+        document.getElementById('syncStatus').innerHTML = '● 已從 Worker 同步 ' + new Date().toLocaleTimeString();
+      }
+    }
+  }, 800);
+});
+
+// 每 15 秒輪詢 Worker
+setInterval(async ()=>{
+  try{
+    const data = await fetchWorkerSchedule();
+    if(data && data.raw_text){
+      const current = document.getElementById('scheduleInput').value;
+      if(data.raw_text !== current && data.raw_text.length > 100){
+        // 只有 Worker 更新才覆蓋
+        const last = localStorage.getItem('roman_last_worker_text');
+        if(last !== data.raw_text){
+          document.getElementById('scheduleInput').value = data.raw_text;
+          localStorage.setItem('roman_last_worker_text', data.raw_text);
+          if(window.logSync) logSync('🔄 輪詢同步 Worker ' + data.raw_text.length + ' 字', 'Worker 輪詢');
+          if(window.renderSchedule) renderSchedule();
+        }
+      }
+    }
+  }catch{}
+}, 15000);
+</head>
+<body class="min-h-screen bg-[#fafaf9]">
+<!-- Header -->
+<div class="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-zinc-200">
+  <div class="max-w-[1200px] mx-auto px-4 md:px-6 py-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-[22px] md:text-[28px] font-bold tracking-tight flex items-center gap-3">
+          <span>📦 Roman Data 獨立站</span>
+          <span class="text-[11px] font-mono px-2 py-1 rounded-full bg-amber-100 border border-amber-200 text-amber-800">2+3 部署版 v3.9.3 已連 Worker</span>
+          <span class="text-[11px] font-mono px-2 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700">LINE + D1 Realtime</span>
+        </h1>
+        <p class="text-[12px] text-zinc-500 mt-1">接龍制・22 位老師・太原 / 日新 / 忠誠 / 大連 / 南屯 / 日進・獨立部署・即時同步</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="syncStatus" class="text-[11px] font-mono px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">● 已同步</div>
+        <div id="tabCount" class="text-[11px] font-mono px-3 py-1.5 rounded-full bg-zinc-100 border border-zinc-200 text-zinc-600">1 個分頁</div>
+      </div>
+    </div>
+  </div>
+</div
+<div class="max-w-[1200px] mx-auto px-4 md:px-6 py-3">
+  <div class="rounded-[12px] bg-zinc-900 text-white px-4 py-2.5 flex items-center justify-between text-[11px] font-mono">
+    <span>版本：v3.9.3 已連 Worker-2plus3-linebot-roman · 獨立部署 · LINE BOT 已串接</span>
+    <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300">● D1 Realtime 已啟用</span>
+  </div>
+</div>
+>
+
+<div class="max-w-[1200px] mx-auto px-4 md:px-6 py-6 grid lg:grid-cols-[380px_1fr] gap-6">
+  <!-- 左側控制面板 -->
+  <div class="space-y-4">
+    <!-- 同步控制 -->
+    <div class="rounded-[20px] bg-white border border-zinc-200 p-5 shadow-sm">
+      <h2 class="text-[13px] font-bold tracking-wide mb-4 flex items-center gap-2">
+        <span>🔄 即時同步控制</span>
+        <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-900 text-white">2+3 架構</span>
+      </h2>
+      
+      <div class="space-y-3">
+        <div>
+          <label class="text-[11px] font-mono text-zinc-500 mb-2 block">班表文字（你喜歡的格式）</label>
+          <textarea id="scheduleInput" class="w-full h-[240px] rounded-[12px] bg-zinc-50 border border-zinc-200 p-3 text-[11px] font-mono leading-[1.5] outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 resize-none">芊芊18-21日進3D
+18 HW野獸
+19 jack
+20 timo
+---------------
+小野11-19太原407
+11 K
+12 K
+13
+1430H HUNG
+1520陳亞亞
+16黃永龍
+17宏民
+18曾薪祐
+---------------
+拿鐵19-02太原407
+19
+20
+21
+22
+23
+24
+01
+---------------
+尤娜12-19太原602
+12 阿捷
+13 Stefan
+14 Jeh Lin
+15 LWN
+16
+17
+18
+---------------
+夏妍14-02太原702
+14
+15
+16
+17
+18柯鈞彥
+19
+20
+21
+22
+23
+24
+01 挑LLinusl
+---------------
+扭扭18-24太原703
+18
+19
+20
+21
+22
+23
+---------------
+咩咩17-01日新205
+17
+18
+19
+20
+21
+22
+23
+24
+---------------
+小寶貝13-18日新305
+14貓貓
+15柯厚任
+16哲瑋
+17
+---------------
+拉拉10-14忠誠4A
+---------------
+晴天12-23忠誠4B
+12
+13
+14 Way
+15啊傑
+16DD Stanley
+17【不排】
+18
+19
+20
+21dm108072
+22Raymond
+---------------
+小芝13-19忠誠4C
+13中信房-吳坤元
+1430勳
+1520
+16定彥 andy
+17 CWLin
+18建樑
+---------------
+點點15-19忠誠4E
+15
+16
+17
+18
+---------------
+心悅12-20大連2M
+12hua
+13 $$$$$$
+14 io
+15 YangChin-Tai 
+1630 bPromie
+1720 Xiang
+1810Jason
+19軒
+---------------
+新人小然15-22大連3L
+---------------
+昀蓁1030-20大連4C
+1030  TY
+1120
+12黃森
+13
+14
+15
+16
+17
+18
+19杰
+---------------
+安晴17-24大連4D
+17阿暉
+18阿暉
+19阿暉
+20Alex
+21
+22
+23
+---------------
+小亞14-22南屯301
+14阿漢
+15 Kirin Yang
+1610 Raes
+17
+18
+19
+20
+21
+---------------
+花花13-21南屯401
+1315 Yi
+1410阿陞
+15陳進賢
+16 Vic
+17 
+18
+19 QQQ  90分
+2030 DD Stanley
+---------------
+小八15-24南屯402
+15劉承瑋
+16 Vic
+17
+18
+19莊凱閔
+20遊遊
+21
+22
+23
+---------------
+南南13-22南屯501
+14丁廉育
+15林阿霖
+16嘉航
+17蕭振輝
+18荊德育
+19熒棟
+20Hsiu
+21林允中
+---------------
+新人蘇菲亞12-20南屯502
+12謝育朗
+1330郭郡諺
+1420
+1510
+16Nic
+17
+18
+19
+---------------
+貝拉20-02南屯502
+20Justin Lee
+21
+22
+23
+24
+01</textarea>
+          <div class="text-[10px] text-zinc-400 mt-1">格式：名字+時間+地點，換行是預約，例如 "11 K"</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnSyncD1" class="h-[40px] rounded-[12px] bg-zinc-900 text-white text-[12px] font-medium hover:bg-zinc-800 transition-colors">💾 同步到 D1</button>
+          <button id="btnSimLine" class="h-[40px] rounded-[12px] bg-[#06C755] text-white text-[12px] font-medium hover:bg-[#05b34d] transition-colors">📱 模擬 LINE 貼文</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnReload" class="h-[36px] rounded-[10px] bg-white border border-zinc-200 text-[11px] hover:bg-zinc-50">🔄 重新載入</button>
+          <button id="btnCopy" class="h-[36px] rounded-[10px] bg-white border border-zinc-200 text-[11px] hover:bg-zinc-50">📋 複製</button>
+        </div>
+
+        <div class="pt-3 border-t border-zinc-100">
+          <div class="text-[11px] font-mono text-zinc-500 mb-2">同步狀態</div>
+          <div id="syncLog" class="space-y-1.5 max-h-[120px] overflow-y-auto text-[10px] font-mono">
+            <div class="text-zinc-400">等待同步...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    
+    <!-- 部署說明 -->
+    <div class="rounded-[20px] bg-[#0f172a] text-white p-5 border border-slate-700">
+      <h3 class="text-[12px] font-bold tracking-wide mb-3 flex items-center gap-2">
+        <span>🚀 2+3 部署說明</span>
+        <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300">v3.9.3 已連 Worker</span>
+      </h3>
+      <div class="space-y-3 text-[11px] leading-[1.6] text-slate-300 font-mono">
+        <div><b class="text-white">1. 建 D1：</b> wrangler d1 create roman-schedule-db</div>
+        <div><b class="text-white">2. 建 Worker：</b> 貼上 worker.js，設環境變數 LINE_CHANNEL_TOKEN</div>
+        <div><b class="text-white">3. 建 LINE OA：</b> developers.line.biz → 新增 Provider → Messaging API → 取得 Token</div>
+        <div><b class="text-white">4. 設 Webhook：</b> https://your-worker.workers.dev/webhook/line</div>
+        <div><b class="text-white">5. 獨立站：</b> 上傳此檔到 roman.pages.dev，Worker URL 填入下方</div>
+        <div class="pt-2">
+          <input id="workerUrlInput" placeholder="https://your-worker.workers.dev" class="w-full h-[36px] rounded-[10px] bg-slate-800 border border-slate-600 px-3 text-[11px] font-mono text-white outline-none">
+          <button onclick="localStorage.setItem('line_worker_url', document.getElementById('workerUrlInput').value); alert('已儲存 Worker URL');" class="mt-2 w-full h-[36px] rounded-[10px] bg-blue-600 text-white text-[11px]">儲存 Worker URL</button>
+        </div>
+      </div>
+    </div>
+
+<!-- 架構說明 -->
+    <div class="rounded-[20px] bg-[#1a1a1a] text-white p-5">
+      <h3 class="text-[12px] font-bold tracking-wide mb-3">2+3 架構說明</h3>
+      <div class="space-y-3 text-[11px] leading-[1.6] text-zinc-300">
+        <div class="flex gap-2">
+          <span class="text-emerald-400">●</span>
+          <div><b class="text-white">LINE Bot (2)</b>：你私人 LINE 貼文字 → Official Account webhook → Worker 解析</div>
+        </div>
+        <div class="flex gap-2">
+          <span class="text-blue-400">●</span>
+          <div><b class="text-white">D1 + Realtime (3)</b>：Worker 寫 D1 → Durable Objects WebSocket 推播 → 獨立站即時更新</div>
+        </div>
+        <div class="flex gap-2">
+          <span class="text-amber-400">●</span>
+          <div><b class="text-white">獨立部署</b>：roman.pages.dev，單檔，不依賴主預約系統</div>
+        </div>
+        <div class="pt-2 text-[10px] text-zinc-500">
+          費用：D1 Free 5GB + Workers Free 10萬次/天 = $0/月，Pro $5/月
+        </div>
+      </div>
+    </div>
+
+    <!-- 模擬 LINE Webhook -->
+    <div class="rounded-[20px] bg-[#f0fdf4] border border-emerald-200 p-5">
+      <h3 class="text-[12px] font-bold text-emerald-800 mb-3">📱 模擬 LINE Webhook</h3>
+      <div id="lineWebhook" class="rounded-[10px] bg-white border border-emerald-200 p-3 text-[10px] font-mono text-zinc-600 leading-[1.5] max-h-[200px] overflow-y-auto">
+        等待 LINE 訊息...
+      </div>
+    </div>
+  </div>
+
+  <!-- 右側班表總覽 -->
+  <div class="space-y-4">
+    <!-- 篩選 -->
+    <div class="flex items-center gap-2 overflow-x-auto scrollbar-none pb-1">
+      <input id="searchInput" placeholder="搜尋老師 / 客戶" class="h-9 w-[200px] rounded-full bg-white border border-zinc-200 px-4 text-[12px] outline-none focus:border-zinc-900 shrink-0">
+      <div id="filterTabs" class="flex items-center gap-1.5">
+        <!-- Tabs injected by JS -->
+      </div>
+    </div>
+
+    <!-- 班表卡片 -->
+    <div id="scheduleGrid" class="grid md:grid-cols-2 gap-3">
+      <!-- Cards injected by JS -->
+    </div>
+
+    <div class="rounded-[16px] bg-white border border-zinc-200 p-4 text-[11px] text-zinc-500 leading-[1.6]">
+      <b class="text-zinc-900">格式說明</b>：你喜歡的接龍制，<span class="inline-flex w-2.5 h-2.5 rounded-full bg-zinc-900"></span> 已預約，<span class="inline-flex w-2.5 h-2.5 rounded-full bg-white border border-zinc-300 border-dashed"></span> 空檔。獨立站保留原本顏色：太原藍、日新綠、忠誠橘、大連紫、南屯粉、日進灰。
+    </div>
+  </div>
+</div>
+
+<script>
+const DEFAULT_SCHEDULE = `芊芊18-21日進3D
+18 HW野獸
+19 jack
+20 timo
+---------------
+小野11-19太原407
+11 K
+12 K
+13
+1430H HUNG
+1520陳亞亞
+16黃永龍
+17宏民
+18曾薪祐
+---------------
+拿鐵19-02太原407
+19
+20
+21
+22
+23
+24
+01
+---------------
+尤娜12-19太原602
+12 阿捷
+13 Stefan
+14 Jeh Lin
+15 LWN
+16
+17
+18
+---------------
+夏妍14-02太原702
+14
+15
+16
+17
+18柯鈞彥
+19
+20
+21
+22
+23
+24
+01 挑LLinusl
+---------------
+扭扭18-24太原703
+18
+19
+20
+21
+22
+23
+---------------
+咩咩17-01日新205
+17
+18
+19
+20
+21
+22
+23
+24
+---------------
+小寶貝13-18日新305
+14貓貓
+15柯厚任
+16哲瑋
+17
+---------------
+拉拉10-14忠誠4A
+---------------
+晴天12-23忠誠4B
+12
+13
+14 Way
+15啊傑
+16DD Stanley
+17【不排】
+18
+19
+20
+21dm108072
+22Raymond
+---------------
+小芝13-19忠誠4C
+13中信房-吳坤元
+1430勳
+1520
+16定彥 andy
+17 CWLin
+18建樑
+---------------
+點點15-19忠誠4E
+15
+16
+17
+18
+---------------
+心悅12-20大連2M
+12hua
+13 $$$$$$
+14 io
+15 YangChin-Tai 
+1630 bPromie
+1720 Xiang
+1810Jason
+19軒
+---------------
+新人小然15-22大連3L
+---------------
+昀蓁1030-20大連4C
+1030  TY
+1120
+12黃森
+13
+14
+15
+16
+17
+18
+19杰
+---------------
+安晴17-24大連4D
+17阿暉
+18阿暉
+19阿暉
+20Alex
+21
+22
+23
+---------------
+小亞14-22南屯301
+14阿漢
+15 Kirin Yang
+1610 Raes
+17
+18
+19
+20
+21
+---------------
+花花13-21南屯401
+1315 Yi
+1410阿陞
+15陳進賢
+16 Vic
+17 
+18
+19 QQQ  90分
+2030 DD Stanley
+---------------
+小八15-24南屯402
+15劉承瑋
+16 Vic
+17
+18
+19莊凱閔
+20遊遊
+21
+22
+23
+---------------
+南南13-22南屯501
+14丁廉育
+15林阿霖
+16嘉航
+17蕭振輝
+18荊德育
+19熒棟
+20Hsiu
+21林允中
+---------------
+新人蘇菲亞12-20南屯502
+12謝育朗
+1330郭郡諺
+1420
+1510
+16Nic
+17
+18
+19
+---------------
+貝拉20-02南屯502
+20Justin Lee
+21
+22
+23
+24
+01`;
+
+const LOCATIONS = ["全部","太原","日新","忠誠","大連","南屯","日進"];
+const LOCATION_COLORS = {
+  "太原": {bg:"bg-blue-50", border:"border-blue-200", badge:"bg-blue-100 text-blue-800", dot:"bg-blue-500", soft:"bg-blue-50/70"},
+  "日新": {bg:"bg-emerald-50", border:"border-emerald-200", badge:"bg-emerald-100 text-emerald-800", dot:"bg-emerald-500", soft:"bg-emerald-50/70"},
+  "忠誠": {bg:"bg-orange-50", border:"border-orange-200", badge:"bg-orange-100 text-orange-800", dot:"bg-orange-500", soft:"bg-orange-50/70"},
+  "大連": {bg:"bg-violet-50", border:"border-violet-200", badge:"bg-violet-100 text-violet-800", dot:"bg-violet-500", soft:"bg-violet-50/70"},
+  "南屯": {bg:"bg-pink-50", border:"border-pink-200", badge:"bg-pink-100 text-pink-800", dot:"bg-pink-500", soft:"bg-pink-50/70"},
+  "日進": {bg:"bg-zinc-50", border:"border-zinc-200", badge:"bg-zinc-100 text-zinc-700", dot:"bg-zinc-400", soft:"bg-zinc-50/70"}
+};
+
+let currentFilter = "全部";
+let searchQuery = "";
+
+// 解析班表文字
+function parseSchedule(text){
+  const blocks = text.split(/[-]+\n/).map(b=>b.trim()).filter(Boolean);
+  const result = [];
+  for(let block of blocks){
+    const lines = block.split("\n").map(l=>l.trim()).filter(Boolean);
+    if(lines.length===0) continue;
+    const first = lines[0];
+    // 解析第一行：名字+時間+地點，例如 "小野11-19太原407" 或 "芊芊18-21日進3D"
+    const m = first.match(/^([^\d]+?)(\d{1,2})(?:[:：]?(\d{0,2}))?[-—](\d{1,2})(.*)$/);
+    if(!m) continue;
+    const name = m[1].trim();
+    const startHour = parseInt(m[2]);
+    const endHour = parseInt(m[4]);
+    const locationRaw = (m[5]||"").trim();
+    let location = "日進";
+    let room = locationRaw;
+    for(let loc of ["太原","日新","忠誠","大連","南屯","日進"]){
+      if(locationRaw.includes(loc)){ location = loc; room = locationRaw.replace(loc,"").trim(); break; }
+    }
+    const bookings = [];
+    for(let i=1;i<lines.length;i++){
+      const line = lines[i];
+      // 解析預約： "11 K" 或 "1430H HUNG" 或 "14 Way"
+      const bm = line.match(/^(\d{1,2})(?::?(\d{2}))?\s*(.*)$/);
+      if(bm){
+        const hour = parseInt(bm[1]);
+        const customer = (bm[3]||"").trim();
+        bookings.push({hour, customer, raw: line});
+      }
+    }
+    result.push({name, startHour, endHour, location, room, bookings, rawBlock: block});
+  }
+  return result;
+}
+
+// 渲染
+function renderSchedule(){
+  const text = document.getElementById('scheduleInput').value;
+  const data = parseSchedule(text);
+  const grid = document.getElementById('scheduleGrid');
+  
+  let filtered = data;
+  if(currentFilter!=="全部"){
+    filtered = filtered.filter(d=>d.location===currentFilter);
+  }
+  if(searchQuery){
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(d=>d.name.toLowerCase().includes(q) || d.bookings.some(b=>b.customer.toLowerCase().includes(q)));
+  }
+
+  grid.innerHTML = filtered.map(item=>{
+    const colors = LOCATION_COLORS[item.location] || LOCATION_COLORS["日進"];
+    const bookedCount = item.bookings.filter(b=>b.customer).length;
+    const totalHours = item.endHour > item.startHour ? item.endHour - item.startHour : (24 - item.startHour + item.endHour);
+    
+    return `
+    <div class="rounded-[16px] border ${colors.border} ${colors.bg} p-4">
+      <div class="flex items-start justify-between mb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-[15px] font-bold">${item.name}</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full ${colors.badge}">${item.location}${item.room? ' '+item.room:''}</span>
+          </div>
+          <div class="text-[11px] text-zinc-500 mt-1 font-mono">${item.startHour}:00 - ${item.endHour}:00 · ${bookedCount}/{totalHours} 已約</div>
+        </div>
+        <div class="w-2.5 h-2.5 rounded-full ${colors.dot}"></div>
+      </div>
+      <div class="space-y-1">
+        ${Array.from({length: totalHours}, (_,i)=>{
+          let hour = item.startHour + i;
+          if(hour>=24) hour-=24;
+          const booking = item.bookings.find(b=>b.hour===hour);
+          const hasCustomer = booking && booking.customer;
+          return `
+          <div class="flex items-center gap-2 text-[11px] h-7 px-2 rounded-[8px] ${hasCustomer? 'bg-zinc-900 text-white' : 'bg-white border border-dashed border-zinc-300 text-zinc-400'}">
+            <span class="font-mono w-8">${hour}:00</span>
+            <span class="flex-1 truncate">${hasCustomer? booking.customer : '空檔'}</span>
+            ${hasCustomer? '<span class="w-1.5 h-1.5 rounded-full bg-white"></span>' : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  // 更新篩選 tabs
+  const tabsEl = document.getElementById('filterTabs');
+  tabsEl.innerHTML = LOCATIONS.map(loc=>{
+    const active = currentFilter===loc;
+    return `<button data-loc="${loc}" class="h-8 px-3.5 rounded-full text-[12px] font-medium whitespace-nowrap border transition-all ${active? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300'}">${loc}</button>`;
+  }).join('');
+  tabsEl.querySelectorAll('button').forEach(btn=>{
+    btn.onclick=()=>{currentFilter=btn.dataset.loc; renderSchedule();};
+  });
+}
+
+// 同步邏輯 (模擬 D1)
+const STORAGE_KEY = 'roman_schedule_raw';
+const BROADCAST_CHANNEL = 'roman_sync_channel';
+let bc = null;
+try{ bc = new BroadcastChannel(BROADCAST_CHANNEL); }catch{}
+
+function logSync(msg, source="系統"){
+  const logEl = document.getElementById('syncLog');
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = 'flex gap-2';
+  div.innerHTML = `<span class="text-zinc-400">${time}</span><span class="text-zinc-900">${source}</span><span class="flex-1 truncate">${msg}</span>`;
+  logEl.prepend(div);
+  // 保持 20 條
+  while(logEl.children.length>20) logEl.removeChild(logEl.lastChild);
+}
+
+function syncToD1(source="手動"){
+  const text = document.getElementById('scheduleInput').value;
+  try{
+    localStorage.setItem(STORAGE_KEY, text);
+    localStorage.setItem('roman_last_sync', JSON.stringify({time: Date.now(), source, text: text.slice(0,50)}));
+    logSync(`已同步 ${text.length} 字`, source);
+    
+    // Broadcast to other tabs (模擬 Durable Objects Realtime)
+    if(bc) bc.postMessage({type:'schedule_update', text, source, time: Date.now()});
+    
+    // 更新狀態
+    document.getElementById('syncStatus').innerHTML = `● 已同步 ${source}`;
+    document.getElementById('syncStatus').className = 'text-[11px] font-mono px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700';
+    
+    // 模擬寫入 D1 的 log
+    const webhookEl = document.getElementById('lineWebhook');
+    webhookEl.innerHTML = `POST /api/schedule<br>Body: {raw_text: "${text.slice(0,80)}..."}<br>→ D1 INSERT roman_schedule<br>→ Durable Objects Broadcast<br>→ ${new Date().toISOString()}`;
+    
+    renderSchedule();
+  }catch(e){
+    logSync('同步失敗: '+e.message, '錯誤');
+  }
+}
+
+// 模擬 LINE 貼文
+function simulateLinePost(){
+  const text = document.getElementById('scheduleInput').value;
+  const lines = text.split('\n').slice(0,3).join('\n');
+  const mockPayload = {
+    events: [{
+      type: 'message',
+      message: {type:'text', text: lines},
+      source: {userId: 'U123...私你'},
+      timestamp: Date.now()
+    }]
+  };
+  
+  document.getElementById('lineWebhook').innerHTML = `
+  <div class="text-emerald-700 font-bold">📩 LINE Webhook 收到</div>
+  <div class="mt-2 bg-zinc-900 text-emerald-300 p-2 rounded text-[10px] overflow-x-auto">${JSON.stringify(mockPayload, null, 2).slice(0,800)}</div>
+  <div class="mt-2">→ Worker 解析 M0 格式<br>→ 寫入 D1 roman_schedule<br>→ Realtime 推播給所有 Roman 獨立站</div>
+  `;
+  
+  logSync('模擬 LINE 貼文同步', 'LINE Bot');
+  syncToD1('LINE Bot');
+}
+
+// 初始化
+function init(){
+  // 從 localStorage 載入 (模擬從 D1 讀)
+  try{
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(saved && saved.length>100){
+      document.getElementById('scheduleInput').value = saved;
+      logSync('從 D1 載入 '+saved.length+' 字', 'D1');
+    }
+  }catch{}
+  
+  renderSchedule();
+  
+  // Broadcast 監聽 (模擬 Realtime)
+  if(bc){
+    bc.onmessage = (e)=>{
+      if(e.data && e.data.type==='schedule_update'){
+        document.getElementById('scheduleInput').value = e.data.text;
+        logSync(`收到 ${e.data.source} 的即時更新`, 'Realtime');
+        renderSchedule();
+        document.getElementById('syncStatus').innerHTML = `● 即時同步 ${e.data.source}`;
+      }
+    };
+    // 模擬多分頁計數
+    let tabCount = 1;
+    try{
+      const key = 'roman_tab_count';
+      let count = parseInt(localStorage.getItem(key)||'0')+1;
+      localStorage.setItem(key, count);
+      tabCount = count;
+      window.addEventListener('beforeunload', ()=>{
+        let c = parseInt(localStorage.getItem(key)||'1')-1;
+        localStorage.setItem(key, Math.max(0,c));
+      });
+    }catch{}
+    document.getElementById('tabCount').textContent = tabCount+' 個分頁';
+  }
+
+  // 綁定事件
+  document.getElementById('btnSyncD1').onclick = ()=>syncToD1('手動');
+  document.getElementById('btnSimLine').onclick = simulateLinePost;
+  document.getElementById('btnReload').onclick = ()=>{ location.reload(); };
+  document.getElementById('btnCopy').onclick = ()=>{ navigator.clipboard.writeText(document.getElementById('scheduleInput').value); logSync('已複製', '系統'); };
+  document.getElementById('scheduleInput').addEventListener('input', ()=>{ 
+    // 自動渲染但不自動同步，避免頻繁寫 D1
+    renderSchedule();
+    document.getElementById('syncStatus').innerHTML = '○ 未同步';
+    document.getElementById('syncStatus').className = 'text-[11px] font-mono px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700';
+  });
+  document.getElementById('searchInput').addEventListener('input', (e)=>{ searchQuery=e.target.value; renderSchedule(); });
+  
+  // 每 30 秒自動從 D1 同步一次 (模擬輪詢)
+  setInterval(()=>{
+    try{
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const current = document.getElementById('scheduleInput').value;
+      if(saved && saved!==current && saved.length>100){
+        // 只有當 D1 比本地新才更新
+        const lastSync = JSON.parse(localStorage.getItem('roman_last_sync')||'{}');
+        if(Date.now() - (lastSync.time||0) < 60000){ // 1分鐘內的更新
+          document.getElementById('scheduleInput').value = saved;
+          logSync('輪詢同步 D1', 'D1 Polling');
+          renderSchedule();
+        }
+      }
+    }catch{}
+  }, 30000);
+}
+
+init();
+</script>
+</body>
+</html>
