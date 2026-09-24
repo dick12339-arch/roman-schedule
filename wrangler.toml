@@ -1,0 +1,14 @@
+name = "roman-schedule"
+main = "worker-v401-beautician-4digit.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "ROMAN_DB"
+database_name = "roman-schedule-db"
+database_id = "8719bcb8-10e9-4f6e-b6c4-54ccf5a36a91"
+
+[vars]
+version = "v401-beautician-4digit"
+env = "production"
+frontend_version = "v401-beautician-4digit-time-search"
