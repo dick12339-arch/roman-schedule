@@ -1,16 +1,41 @@
 // roman worker v402 - 融合預約回覆版・based on new html upload - lower case
+// v403-shared-d1: 與 Roman OS (roman-os.pages.dev /api/roman) 共用同一個 D1 (8719bcb8)
+//   寫入時同時更新 roman_data（Roman OS 的正本，id=太原），讀取時取兩張表較新的那份
 let memoryStore = { raw_text: '', updated_at: '', updated_by: 'memory' };
+const SHARED_SITE = '太原';
+async function ensureSharedTables(db){
+  await db.batch([
+    db.prepare('CREATE TABLE IF NOT EXISTS roman_data (id TEXT PRIMARY KEY, raw TEXT, site TEXT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS roman_schedule (id TEXT PRIMARY KEY, raw_text TEXT, parsed TEXT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_by TEXT, source TEXT)')
+  ]);
+}
 async function insertSchedule(db, id, raw_text, updated_by, source){
+  await ensureSharedTables(db);
   try{
-    await db.prepare('INSERT INTO roman_schedule (id, raw_text, parsed, updated_at, updated_by, source) VALUES (?, ?, ?, datetime("now"), ?, ?)').bind(id, raw_text, JSON.stringify([]), updated_by, source).run();
-    return true;
+    await db.prepare('INSERT INTO roman_schedule (id, raw_text, parsed, updated_at, updated_by, source) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)').bind(id, raw_text, JSON.stringify([]), updated_by, source).run();
   }catch(e){
     if(e.message.includes('no column named parsed') || e.message.includes('no such column')){
-      await db.prepare('INSERT INTO roman_schedule (id, raw_text, updated_at, updated_by, source) VALUES (?, ?, datetime("now"), ?, ?)').bind(id, raw_text, updated_by, source).run();
-      return true;
-    }
-    throw e;
+      await db.prepare('INSERT INTO roman_schedule (id, raw_text, updated_at, updated_by, source) VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?)').bind(id, raw_text, updated_by, source).run();
+    }else throw e;
   }
+  // 同步到 Roman OS 正本
+  await db.prepare('INSERT INTO roman_data (id, raw, site, updated_at) VALUES (?1, ?2, ?1, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET raw=?2, site=?1, updated_at=CURRENT_TIMESTAMP').bind(SHARED_SITE, raw_text).run();
+  return true;
+}
+async function readLatestShared(db){
+  await ensureSharedTables(db);
+  let w = null, o = null;
+  try{ w = await db.prepare('SELECT * FROM roman_schedule ORDER BY updated_at DESC LIMIT 1').first(); }catch(e){}
+  try{ o = await db.prepare('SELECT id, raw, updated_at FROM roman_data WHERE id=?1 OR site=?1 ORDER BY updated_at DESC LIMIT 1').bind(SHARED_SITE).first(); }catch(e){}
+  if(o && o.raw && (!w || String(o.updated_at||'') > String(w.updated_at||''))){
+    return {raw_text:o.raw, parsed:[], updated_at:o.updated_at, updated_by:'roman_os', source:'roman_data'};
+  }
+  if(w){
+    let parsed = [];
+    try{ parsed = w.parsed ? JSON.parse(w.parsed) : []; }catch(e){}
+    return {raw_text:w.raw_text, parsed, updated_at:w.updated_at, updated_by:w.updated_by, source:w.source};
+  }
+  return null;
 }
 
 function getCorsHeaders(request){
@@ -187,13 +212,8 @@ export default {
     if(url.pathname==='/api/schedule' && request.method==='GET'){
       try{
         if(!hasD1) return new Response(JSON.stringify({raw_text: memoryStore.raw_text, parsed:[], updated_at: memoryStore.updated_at, updated_by:'memory', warning:'D1未綁定'}),{headers:{...cors,'Content-Type':'application/json'}});
-        try{
-          const r = await env.ROMAN_DB.prepare('SELECT * FROM roman_schedule ORDER BY updated_at DESC LIMIT 1').first();
-          if(r) return new Response(JSON.stringify({raw_text:r.raw_text, parsed: r.parsed ? JSON.parse(r.parsed) : [], updated_at:r.updated_at, updated_by:r.updated_by, source:r.source}),{headers:{...cors,'Content-Type':'application/json'}});
-        }catch(e){
-          const r = await env.ROMAN_DB.prepare('SELECT id, raw_text, updated_at, updated_by, source FROM roman_schedule ORDER BY updated_at DESC LIMIT 1').first();
-          if(r) return new Response(JSON.stringify({raw_text:r.raw_text, parsed:[], updated_at:r.updated_at, updated_by:r.updated_by, source:r.source}),{headers:{...cors,'Content-Type':'application/json'}});
-        }
+        const r = await readLatestShared(env.ROMAN_DB);
+        if(r) return new Response(JSON.stringify(r),{headers:{...cors,'Content-Type':'application/json'}});
         return new Response(JSON.stringify({raw_text:'', parsed:[]}),{headers:{...cors,'Content-Type':'application/json'}});
       }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
     }
