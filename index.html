@@ -133,11 +133,31 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   }
 
   var box = null, pending = [], manual = false;
+  // 客人已到：點名字變灰色，再點一次恢復；記在這台瀏覽器，2 天後自動清掉
+  var KEY_ARR = 'roman_arrived';
+  function arrived(){ try{ return JSON.parse(ls(KEY_ARR) || '{}') || {}; }catch(e){ return {}; } }
+  function arrKey(s, x){ return s.at.getTime() + '|' + x.name + '|' + x.cust; }
+  function custLine(s, x, size, lh){
+    var k = arrKey(s, x), on = !!arrived()[k];
+    return '<div class="rr-line" data-k="' + esc(k) + '" data-on="' + (on ? 1 : 0) + '" title="點一下標記已到 / 取消" style="cursor:pointer;user-select:none;font-size:' + size + 'px;line-height:' + lh + ';color:' + (on ? 'var(--faint,#a1a1aa)' : 'var(--text,#222)') + '">' + esc(x.name) + '：' + esc(x.cust) + '</div>';
+  }
+  function bindArrive(root){
+    Array.prototype.forEach.call(root.querySelectorAll('.rr-line[data-k]'), function(el){
+      el.onclick = function(){
+        var a = arrived(), k = el.getAttribute('data-k'), now = Date.now();
+        Object.keys(a).forEach(function(x){ if(now - a[x] > 2 * 86400000) delete a[x]; });
+        if(a[k]) delete a[k]; else a[k] = now;
+        ls(KEY_ARR, JSON.stringify(a));
+        el.setAttribute('data-on', a[k] ? 1 : 0);
+        el.style.color = a[k] ? 'var(--faint,#a1a1aa)' : 'var(--text,#222)';
+      };
+    });
+  }
   function minsLeft(s){ return Math.max(0, Math.ceil((s.at - new Date()) / 60000)); }
   function slotHtml(s, big, first){
     var h = '<div style="' + (first ? '' : 'border-top:1px solid var(--line,#eee);margin-top:14px;padding-top:14px;') + '">';
     h += '<div class="rr-title" style="font-size:' + (big ? 22 : 17) + 'px;font-weight:800;color:var(--text,#111);margin-bottom:6px">' + esc(s.label) + '預約' + s.list.length + '位' + (big ? '' : '<span style="font-size:12px;font-weight:500;color:var(--muted,#71717a);margin-left:8px">還有 ' + minsLeft(s) + ' 分鐘</span>') + '</div>';
-    s.list.forEach(function(x){ h += '<div class="rr-line" style="font-size:' + (big ? 17 : 15) + 'px;line-height:1.7;color:var(--text,#222)">' + esc(x.name) + '：' + esc(x.cust) + '</div>'; });
+    s.list.forEach(function(x){ h += custLine(s, x, big ? 17 : 15, 1.7); });
     return h + '</div>';
   }
   function closeBox(){ pending = []; manual = false; if(box){ box.remove(); box = null; } }
@@ -171,19 +191,21 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       all.forEach(function(s, i){
         var d = Math.round((s.at - now) / 60000), past = s.at <= now, isNext = i === nextIdx;
         var tag = past ? (d === 0 ? '現在' : '已過 ' + (-d) + ' 分') : (isNext ? '下一個・還有 ' + d + ' 分' : '還有 ' + d + ' 分');
-        html += '<div class="rr-slot" style="margin-top:6px;padding:7px 10px;border-radius:10px;' + (isNext ? 'background:var(--subtle,#f4f4f5);border-left:3px solid #b45309;' : 'border-left:3px solid transparent;') + (past ? 'opacity:.55;' : '') + '">';
-        html += '<div class="rr-title" style="font-size:' + (isNext ? 16 : 14) + 'px;font-weight:800;color:var(--text,#111)">' + esc(s.label) + '預約' + s.list.length + '位<span style="font-size:11px;font-weight:500;color:' + (isNext ? '#b45309' : 'var(--muted,#71717a)') + ';margin-left:6px">' + tag + '</span></div>';
-        s.list.forEach(function(x){ html += '<div class="rr-line" style="font-size:13px;line-height:1.5;color:var(--text,#222)">' + esc(x.name) + '：' + esc(x.cust) + '</div>'; });
+        html += '<div class="rr-slot" style="margin-top:6px;padding:7px 10px;border-radius:10px;' + (isNext ? 'background:var(--subtle,#f4f4f5);border-left:3px solid #b45309;' : 'border-left:3px solid transparent;') + '">';
+        html += '<div class="rr-title" style="font-size:' + (isNext ? 16 : 14) + 'px;font-weight:800;color:' + (past ? 'var(--muted,#71717a)' : 'var(--text,#111)') + '">' + esc(s.label) + '預約' + s.list.length + '位<span style="font-size:11px;font-weight:500;color:' + (isNext ? '#b45309' : 'var(--muted,#71717a)') + ';margin-left:6px">' + tag + '</span></div>';
+        s.list.forEach(function(x){ html += custLine(s, x, 13, 1.6); });
         html += '</div>';
       });
       if(all.length && nextIdx < 0) html += '<div style="font-size:12px;color:var(--muted,#71717a);margin-top:8px">接下來沒有預約</div>';
-      html += '<div style="margin-top:10px;font-size:11px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:4px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:1px 8px;font-size:11px;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
+      if(all.length) html += '<div style="margin-top:8px;font-size:11px;color:var(--muted,#71717a)">點客人名字＝已到（變灰），再點一次取消</div>';
+      html += '<div style="margin-top:6px;font-size:11px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:4px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:1px 8px;font-size:11px;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
     }else{
       html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒（還有 ' + minsLeft(pending[0]) + ' 分鐘）</div>';
       pending.forEach(function(s, i){ html += slotHtml(s, true, i === 0); });
     }
     html += '<button id="roman-remind-ok" style="margin-top:' + (manual ? 12 : 18) + 'px;width:100%;padding:' + (manual ? 9 : 12) + 'px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:' + (manual ? 14 : 16) + 'px;font-weight:700;cursor:pointer">知道了</button></div>';
     box.innerHTML = html;
+    bindArrive(box);
     box.querySelector('#roman-remind-ok').onclick = closeBox;
     var tg = box.querySelector('#roman-remind-toggle');
     if(tg) tg.onclick = function(){
