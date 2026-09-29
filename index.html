@@ -136,15 +136,23 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     return h + '</div>';
   }
   function closeBox(){ pending = []; manual = false; if(box){ box.remove(); box = null; } }
+  // 放在 Roman OS 裡（iframe）時，提醒視窗改開在外層頁面，切到別的分頁也看得到
+  function hostDoc(){ try{ if(window.parent && window.parent !== window && window.parent.document && window.parent.document.body) return window.parent.document; }catch(e){} return document; }
+  var THEME_VARS = ['--surface','--text','--text2','--muted','--line','--primary','--on-primary'];
+  window.addEventListener('pagehide', function(){ if(box){ try{ box.remove(); }catch(e){} box = null; } });
   function render(){
+    var hd = hostDoc();
+    if(box && box.ownerDocument !== hd){ box.remove(); box = null; }
     if(!box){
-      box = document.createElement('div');
+      box = hd.createElement('div');
       box.id = 'roman-remind-modal';
       box.setAttribute('role', 'alertdialog');
       box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif';
       box.addEventListener('click', function(e){ if(e.target === box && manual) closeBox(); });
-      document.body.appendChild(box);
+      hd.body.appendChild(box);
     }
+    var cs = getComputedStyle(document.documentElement);
+    THEME_VARS.forEach(function(n){ var v = cs.getPropertyValue(n); if(v) box.style.setProperty(n, v.trim()); });
     var html = '<div style="background:var(--surface,#fff);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:20px 22px">';
     if(manual){
       var up = slots(new Date()).filter(function(s){ return s.at > new Date(); });
@@ -166,8 +174,8 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     }
     html += '<button id="roman-remind-ok" style="margin-top:18px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:16px;font-weight:700;cursor:pointer">知道了</button></div>';
     box.innerHTML = html;
-    document.getElementById('roman-remind-ok').onclick = closeBox;
-    var tg = document.getElementById('roman-remind-toggle');
+    box.querySelector('#roman-remind-ok').onclick = closeBox;
+    var tg = box.querySelector('#roman-remind-toggle');
     if(tg) tg.onclick = function(){
       ls(KEY_ON, isOn() ? '0' : '1');
       if(isOn() && 'Notification' in window && Notification.permission === 'default'){ try{ Notification.requestPermission(); }catch(e){} }
