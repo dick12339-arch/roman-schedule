@@ -100,7 +100,9 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
         var cust = (b.customer || '').trim();
         if(!cust || cust.indexOf('不排') >= 0) return;
         var mins = b.hour * 60 + (b.minute || 0);
-        if(b.hour < 12 && t.start != null && t.start >= 12 && b.hour < t.start) mins += 1440; // 過午夜的預約
+        // 過午夜的預約：只有跨夜的班（例如 20-2）裡、凌晨時段的預約才算隔天；另外 6 點前的預約也算隔天
+        var crossNight = t.start != null && t.end != null && t.end < t.start;
+        if((crossNight && b.hour < t.start && b.hour <= t.end + 1) || (b.hour < 6 && t.start != null && t.start >= 12)) mins += 1440;
         var at = new Date(base.getTime()); at.setMinutes(at.getMinutes() + mins);
         var k = String(at.getTime());
         if(!map[k]) map[k] = { at: at, label: label(b.hour, b.minute), list: [] };
@@ -125,26 +127,52 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     }catch(e){}
   }
 
-  var box = null, pending = [];
+  var box = null, pending = [], manual = false;
+  function minsLeft(s){ return Math.max(0, Math.ceil((s.at - new Date()) / 60000)); }
+  function slotHtml(s, big, first){
+    var h = '<div style="' + (first ? '' : 'border-top:1px solid var(--line,#eee);margin-top:14px;padding-top:14px;') + '">';
+    h += '<div class="rr-title" style="font-size:' + (big ? 22 : 17) + 'px;font-weight:800;color:var(--text,#111);margin-bottom:6px">' + esc(s.label) + '預約' + s.list.length + '位' + (big ? '' : '<span style="font-size:12px;font-weight:500;color:var(--muted,#71717a);margin-left:8px">還有 ' + minsLeft(s) + ' 分鐘</span>') + '</div>';
+    s.list.forEach(function(x){ h += '<div class="rr-line" style="font-size:' + (big ? 17 : 15) + 'px;line-height:1.7;color:var(--text,#222)">' + esc(x.name) + '：' + esc(x.cust) + '</div>'; });
+    return h + '</div>';
+  }
+  function closeBox(){ pending = []; manual = false; if(box){ box.remove(); box = null; } }
   function render(){
     if(!box){
       box = document.createElement('div');
       box.id = 'roman-remind-modal';
       box.setAttribute('role', 'alertdialog');
       box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif';
+      box.addEventListener('click', function(e){ if(e.target === box && manual) closeBox(); });
       document.body.appendChild(box);
     }
     var html = '<div style="background:var(--surface,#fff);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:20px 22px">';
-    html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒（' + LEAD_MIN + ' 分鐘後）</div>';
-    pending.forEach(function(s, i){
-      html += '<div style="' + (i ? 'border-top:1px solid var(--line,#eee);margin-top:14px;padding-top:14px;' : '') + '">';
-      html += '<div class="rr-title" style="font-size:22px;font-weight:800;color:var(--text,#111);margin-bottom:8px">' + esc(s.label) + '預約' + s.list.length + '位</div>';
-      s.list.forEach(function(x){ html += '<div class="rr-line" style="font-size:17px;line-height:1.7;color:var(--text,#222)">' + esc(x.name) + '：' + esc(x.cust) + '</div>'; });
-      html += '</div>';
-    });
+    if(manual){
+      var up = slots(new Date()).filter(function(s){ return s.at > new Date(); });
+      if(up.length){
+        html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 下一個預約（還有 ' + minsLeft(up[0]) + ' 分鐘）</div>';
+        html += slotHtml(up[0], true, true);
+        if(up.length > 1){
+          html += '<div style="font-size:12px;font-weight:700;color:var(--muted,#71717a);margin-top:18px">之後的預約</div>';
+          up.slice(1).forEach(function(s, i){ html += slotHtml(s, false, i === 0); });
+        }
+      }else{
+        html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒</div>';
+        html += '<div style="font-size:17px;color:var(--text,#222);line-height:1.7">接下來沒有預約</div>';
+      }
+      html += '<div style="margin-top:14px;font-size:12px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（每個時段前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:6px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
+    }else{
+      html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒（還有 ' + minsLeft(pending[0]) + ' 分鐘）</div>';
+      pending.forEach(function(s, i){ html += slotHtml(s, true, i === 0); });
+    }
     html += '<button id="roman-remind-ok" style="margin-top:18px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:16px;font-weight:700;cursor:pointer">知道了</button></div>';
     box.innerHTML = html;
-    document.getElementById('roman-remind-ok').onclick = function(){ pending = []; box.remove(); box = null; };
+    document.getElementById('roman-remind-ok').onclick = closeBox;
+    var tg = document.getElementById('roman-remind-toggle');
+    if(tg) tg.onclick = function(){
+      ls(KEY_ON, isOn() ? '0' : '1');
+      if(isOn() && 'Notification' in window && Notification.permission === 'default'){ try{ Notification.requestPermission(); }catch(e){} }
+      tick(); render();
+    };
   }
   function notifySystem(s){
     try{
@@ -159,13 +187,9 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     if(!pill){
       pill = document.createElement('button');
       pill.id = 'roman-remind-pill';
-      pill.title = '點一下開 / 關預約提醒';
+      pill.title = '點一下看預約提醒';
       pill.style.cssText = 'position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2147482000;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:6px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);cursor:pointer;max-width:calc(100vw - 24px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      pill.onclick = function(){
-        ls(KEY_ON, isOn() ? '0' : '1');
-        if(isOn() && 'Notification' in window && Notification.permission === 'default'){ try{ Notification.requestPermission(); }catch(e){} }
-        tick();
-      };
+      pill.onclick = function(){ manual = true; pending = []; render(); };
       document.body.appendChild(pill);
     }
     if(!isOn()){ pill.textContent = '🔕 預約提醒：關'; return; }
@@ -193,7 +217,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
         pending.push(s); notifySystem(s);
       });
       pending.sort(function(a, b){ return a.at - b.at; });
-      render(); beep();
+      manual = false; render(); beep();
     }
   }
   window.__romanRemindTick = tick;
