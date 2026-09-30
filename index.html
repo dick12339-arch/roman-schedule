@@ -117,7 +117,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
         var at = slotAt(base, t, b.hour, b.minute);
         var k = String(at.getTime());
         if(!map[k]) map[k] = { at: at, label: label(b.hour, b.minute), list: [] };
-        map[k].list.push({ name: t.name || '美容師', cust: cust });
+        map[k].list.push({ name: t.name || '美容師', loc: (t.location || '').trim(), cust: cust });
       });
     });
     return Object.keys(map).map(function(k){ return map[k]; }).sort(function(a, b){ return a.at - b.at; });
@@ -145,7 +145,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   function arrKey(s, x){ return s.at.getTime() + '|' + x.name + '|' + x.cust; }
   function custLine(s, x, size, lh){
     var k = arrKey(s, x), on = !!arrived()[k];
-    return '<div class="rr-line" data-k="' + esc(k) + '" data-on="' + (on ? 1 : 0) + '" title="點一下標記已到 / 取消" style="cursor:pointer;user-select:none;font-size:' + size + 'px;line-height:' + lh + ';color:' + (on ? 'var(--faint,#a1a1aa)' : 'var(--text,#222)') + '">' + esc(x.name) + '：' + esc(x.cust) + '</div>';
+    return '<div class="rr-line" data-k="' + esc(k) + '" data-on="' + (on ? 1 : 0) + '" title="點一下標記已到 / 取消" style="cursor:pointer;user-select:none;font-size:' + size + 'px;line-height:' + lh + ';color:' + (on ? 'var(--faint,#a1a1aa)' : 'var(--text,#222)') + '">' + esc(x.name) + (x.loc ? '<span class="rr-loc" style="font-size:.82em;font-weight:600;color:var(--muted,#71717a);margin-left:4px">' + esc(x.loc) + '</span>' : '') + '：' + esc(x.cust) + '</div>';
   }
   function bindArrive(root){
     Array.prototype.forEach.call(root.querySelectorAll('.rr-line[data-k]'), function(el){
@@ -223,7 +223,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   function notifySystem(s){
     try{
       if(!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
-      new Notification(s.label + '預約' + s.list.length + '位', { body: s.list.map(function(x){ return x.name + '：' + x.cust; }).join(String.fromCharCode(10)), tag: 'roman-' + s.at.getTime(), requireInteraction: true });
+      new Notification(s.label + '預約' + s.list.length + '位', { body: s.list.map(function(x){ return x.name + (x.loc ? ' ' + x.loc : '') + '：' + x.cust; }).join(String.fromCharCode(10)), tag: 'roman-' + s.at.getTime(), requireInteraction: true });
     }catch(e){}
   }
 
