@@ -117,7 +117,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
         var at = slotAt(base, t, b.hour, b.minute);
         var k = String(at.getTime());
         if(!map[k]) map[k] = { at: at, label: label(b.hour, b.minute), list: [] };
-        map[k].list.push({ name: t.name || '美容師', loc: (t.location || '').trim(), cust: cust });
+        map[k].list.push({ name: t.name || '美容師', loc: (t.location || '').split(/[(（]/)[0].trim(), cust: cust });
       });
     });
     return Object.keys(map).map(function(k){ return map[k]; }).sort(function(a, b){ return a.at - b.at; });
