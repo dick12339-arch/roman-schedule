@@ -171,45 +171,55 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   function hostDoc(){ try{ if(window.parent && window.parent !== window && window.parent.document && window.parent.document.body) return window.parent.document; }catch(e){} return document; }
   var THEME_VARS = ['--surface','--text','--text2','--muted','--line','--primary','--on-primary'];
   window.addEventListener('pagehide', function(){ if(box){ try{ box.remove(); }catch(e){} box = null; } });
+  var FONT_CSS = 'https://fonts.googleapis.com/css2?family=Huninn&display=swap';
+  var FONT_STACK = "'Huninn','jf-openhuninn','Noto Sans TC',-apple-system,BlinkMacSystemFont,sans-serif";
+  function ensureFont(hd){
+    try{
+      if(hd.getElementById('roman-remind-font')) return;
+      var l = hd.createElement('link'); l.id = 'roman-remind-font'; l.rel = 'stylesheet'; l.href = FONT_CSS;
+      hd.head.appendChild(l);
+    }catch(e){}
+  }
   function render(){
     var hd = hostDoc();
+    ensureFont(hd);
     if(box && box.ownerDocument !== hd){ box.remove(); box = null; }
     if(!box){
       box = hd.createElement('div');
       box.id = 'roman-remind-modal';
       box.setAttribute('role', 'alertdialog');
-      box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif';
+      box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:' + FONT_STACK;
       box.addEventListener('click', function(e){ if(e.target === box && manual) closeBox(); });
       hd.body.appendChild(box);
     }
     var cs = getComputedStyle(document.documentElement);
     THEME_VARS.forEach(function(n){ var v = cs.getPropertyValue(n); if(v) box.style.setProperty(n, v.trim()); });
     var html = manual
-      ? '<div style="background:var(--surface,#fff);border-radius:14px;max-width:340px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 16px 40px rgba(0,0,0,.28);padding:14px 16px">'
+      ? '<div style="background:var(--surface,#fff);border-radius:16px;max-width:380px;width:100%;max-height:82vh;overflow:auto;box-shadow:0 16px 40px rgba(0,0,0,.28);padding:16px 18px">'
       : '<div style="background:var(--surface,#fff);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:20px 22px">';
     if(manual){
       // 預約一覽：保留前一個整點起的預約（例如現在 19:05 → 從 18:00 開始），接著是下一個與之後的預約
       var now = new Date(), from = new Date(now.getTime()); from.setMinutes(0, 0, 0); from.setHours(from.getHours() - 1);
       var all = slots(now).filter(function(s){ return s.at >= from; });
       var nextIdx = -1; all.forEach(function(s, i){ if(nextIdx < 0 && s.at > now) nextIdx = i; });
-      html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px"><span style="font-size:13px;color:#b45309;font-weight:700">⏰ 預約一覽</span><span style="font-size:11px;color:var(--muted,#71717a)">現在 ' + label(now.getHours(), now.getMinutes()) + '</span></div>';
-      if(!all.length) html += '<div style="font-size:14px;color:var(--text,#222);padding:8px 0">前一小時到現在之後都沒有預約</div>';
+      html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px"><span style="font-size:16px;color:#b45309;font-weight:700">⏰ 預約一覽</span><span style="font-size:13px;color:var(--muted,#71717a)">現在 ' + label(now.getHours(), now.getMinutes()) + '</span></div>';
+      if(!all.length) html += '<div style="font-size:17px;color:var(--text,#222);padding:8px 0">前一小時到現在之後都沒有預約</div>';
       all.forEach(function(s, i){
         var d = Math.round((s.at - now) / 60000), past = s.at <= now, isNext = i === nextIdx;
         var tag = past ? (d === 0 ? '現在' : '已過 ' + (-d) + ' 分') : (isNext ? '下一個・還有 ' + d + ' 分' : '還有 ' + d + ' 分');
-        html += '<div class="rr-slot" style="margin-top:6px;padding:7px 10px;border-radius:10px;' + (isNext ? 'background:var(--subtle,#f4f4f5);border-left:3px solid #b45309;' : 'border-left:3px solid transparent;') + '">';
-        html += '<div class="rr-title" style="font-size:' + (isNext ? 16 : 14) + 'px;font-weight:800;color:' + (past ? 'var(--muted,#71717a)' : 'var(--text,#111)') + '">' + esc(s.label) + '預約' + s.list.length + '位<span style="font-size:11px;font-weight:500;color:' + (isNext ? '#b45309' : 'var(--muted,#71717a)') + ';margin-left:6px">' + tag + '</span></div>';
-        s.list.forEach(function(x){ html += custLine(s, x, 13, 1.6); });
+        html += '<div class="rr-slot" style="margin-top:8px;padding:8px 12px;border-radius:12px;' + (isNext ? 'background:var(--subtle,#f4f4f5);border-left:3px solid #b45309;' : 'border-left:3px solid transparent;') + '">';
+        html += '<div class="rr-title" style="font-size:' + (isNext ? 21 : 18) + 'px;font-weight:700;color:' + (past ? 'var(--muted,#71717a)' : 'var(--text,#111)') + '">' + esc(s.label) + '預約' + s.list.length + '位<span style="font-size:13px;font-weight:400;color:' + (isNext ? '#b45309' : 'var(--muted,#71717a)') + ';margin-left:6px">' + tag + '</span></div>';
+        s.list.forEach(function(x){ html += custLine(s, x, 17, 1.6); });
         html += '</div>';
       });
-      if(all.length && nextIdx < 0) html += '<div style="font-size:12px;color:var(--muted,#71717a);margin-top:8px">接下來沒有預約</div>';
-      if(all.length) html += '<div style="margin-top:8px;font-size:11px;color:var(--muted,#71717a)">點客人名字＝已到（變灰），再點一次取消</div>';
-      html += '<div style="margin-top:6px;font-size:11px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:4px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:1px 8px;font-size:11px;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
+      if(all.length && nextIdx < 0) html += '<div style="font-size:14px;color:var(--muted,#71717a);margin-top:8px">接下來沒有預約</div>';
+      if(all.length) html += '<div style="margin-top:10px;font-size:13px;color:var(--muted,#71717a)">點客人名字＝已到（變灰），再點一次取消</div>';
+      html += '<div style="margin-top:6px;font-size:13px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:4px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:2px 10px;font-size:13px;font-family:inherit;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
     }else{
       html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒（還有 ' + minsLeft(pending[0]) + ' 分鐘）</div>';
       pending.forEach(function(s, i){ html += slotHtml(s, true, i === 0); });
     }
-    html += '<button id="roman-remind-ok" style="margin-top:' + (manual ? 12 : 18) + 'px;width:100%;padding:' + (manual ? 9 : 12) + 'px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:' + (manual ? 14 : 16) + 'px;font-weight:700;cursor:pointer">知道了</button></div>';
+    html += '<button id="roman-remind-ok" style="margin-top:' + (manual ? 12 : 18) + 'px;width:100%;padding:' + (manual ? 9 : 12) + 'px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:' + (manual ? 17 : 16) + 'px;font-weight:700;font-family:inherit;cursor:pointer">知道了</button></div>';
     box.innerHTML = html;
     bindArrive(box);
     box.querySelector('#roman-remind-ok').onclick = closeBox;
@@ -267,7 +277,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     }
   }
   window.__romanRemindTick = tick;
-  function start(){ tick(); setInterval(tick, CHECK_MS); document.addEventListener('visibilitychange', function(){ if(!document.hidden) tick(); }); }
+  function start(){ ensureFont(hostDoc()); tick(); setInterval(tick, CHECK_MS); document.addEventListener('visibilitychange', function(){ if(!document.hidden) tick(); }); }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(start, 800); }); else setTimeout(start, 800);
 })();
 </script>
