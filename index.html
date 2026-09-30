@@ -180,6 +180,35 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       hd.head.appendChild(l);
     }catch(e){}
   }
+  var KEY_POS = 'roman_remind_pos', justDragged = false;
+  var pos = (function(){ try{ var v = JSON.parse(ls(KEY_POS) || 'null'); if(v && isFinite(v.x) && isFinite(v.y)) return v; }catch(e){} return { x: 0, y: 0 }; })();
+  function applyPos(card){ card.style.transform = 'translate(' + Math.round(pos.x) + 'px,' + Math.round(pos.y) + 'px)'; }
+  function clampPos(card){
+    var win = card.ownerDocument.defaultView, W = win.innerWidth, H = win.innerHeight, r = card.getBoundingClientRect();
+    if(r.width > W){ pos.x -= r.left + (r.width - W) / 2; }
+    else if(r.left < 0){ pos.x -= r.left; } else if(r.right > W){ pos.x -= r.right - W; }
+    if(r.top < 0){ pos.y -= r.top; } else if(r.top > H - 60){ pos.y -= r.top - (H - 60); }
+    applyPos(card);
+  }
+  function bindDrag(card){
+    Array.prototype.forEach.call(card.querySelectorAll('.rr-drag'), function(h){
+      h.addEventListener('pointerdown', function(e){
+        if(e.button) return;
+        if(e.target.closest && e.target.closest('button')) return;
+        e.preventDefault();
+        var sx = e.clientX, sy = e.clientY, ox = pos.x, oy = pos.y, moved = false;
+        try{ h.setPointerCapture(e.pointerId); }catch(err){}
+        card.style.transition = 'none'; h.style.cursor = 'grabbing';
+        function mv(ev){ var dx = ev.clientX - sx, dy = ev.clientY - sy; if(Math.abs(dx) + Math.abs(dy) > 3) moved = true; pos = { x: ox + dx, y: oy + dy }; applyPos(card); }
+        function up(){
+          h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up);
+          h.style.cursor = 'grab'; clampPos(card); ls(KEY_POS, JSON.stringify(pos));
+          if(moved){ justDragged = true; setTimeout(function(){ justDragged = false; }, 50); }
+        }
+        h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+      });
+    });
+  }
   function render(){
     var hd = hostDoc();
     ensureFont(hd);
@@ -189,7 +218,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       box.id = 'roman-remind-modal';
       box.setAttribute('role', 'alertdialog');
       box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:' + FONT_STACK;
-      box.addEventListener('click', function(e){ if(e.target === box && manual) closeBox(); });
+      box.addEventListener('click', function(e){ if(e.target === box && manual && !justDragged) closeBox(); });
       hd.body.appendChild(box);
     }
     var cs = getComputedStyle(document.documentElement);
@@ -197,12 +226,13 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     var html = manual
       ? '<div style="background:var(--surface,#fff);border-radius:16px;max-width:380px;width:100%;max-height:82vh;overflow:auto;box-shadow:0 16px 40px rgba(0,0,0,.28);padding:16px 18px">'
       : '<div style="background:var(--surface,#fff);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:20px 22px">';
+    html += '<div class="rr-drag" title="按住拖拉移動" style="display:flex;justify-content:center;padding:0 0 10px;margin-top:-6px;cursor:grab;touch-action:none;user-select:none"><span style="width:44px;height:5px;border-radius:3px;background:var(--line,#e4e4e7)"></span></div>';
     if(manual){
       // 預約一覽：保留前一個整點起的預約（例如現在 19:05 → 從 18:00 開始），接著是下一個與之後的預約
       var now = new Date(), from = new Date(now.getTime()); from.setMinutes(0, 0, 0); from.setHours(from.getHours() - 1);
       var all = slots(now).filter(function(s){ return s.at >= from; });
       var nextIdx = -1; all.forEach(function(s, i){ if(nextIdx < 0 && s.at > now) nextIdx = i; });
-      html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px"><span style="font-size:16px;color:#b45309;font-weight:700">⏰ 預約一覽</span><span style="font-size:13px;color:var(--muted,#71717a)">現在 ' + label(now.getHours(), now.getMinutes()) + '</span></div>';
+      html += '<div class="rr-drag" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;cursor:grab;touch-action:none;user-select:none"><span style="font-size:16px;color:#b45309;font-weight:700">⏰ 預約一覽</span><span style="font-size:13px;color:var(--muted,#71717a)">現在 ' + label(now.getHours(), now.getMinutes()) + '</span></div>';
       if(!all.length) html += '<div style="font-size:17px;color:var(--text,#222);padding:8px 0">前一小時到現在之後都沒有預約</div>';
       all.forEach(function(s, i){
         var d = Math.round((s.at - now) / 60000), past = s.at <= now, isNext = i === nextIdx;
@@ -216,11 +246,12 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       if(all.length) html += '<div style="margin-top:10px;font-size:13px;color:var(--muted,#71717a)">點客人名字＝已到（變灰），再點一次取消</div>';
       html += '<div style="margin-top:6px;font-size:13px;color:var(--muted,#71717a)">自動提醒：' + (isOn() ? '開（前 ' + LEAD_MIN + ' 分鐘跳出）' : '關') + ' <button id="roman-remind-toggle" style="margin-left:4px;border:1px solid var(--line,#e5e7eb);background:var(--surface,#fff);color:var(--text2,#374151);border-radius:999px;padding:2px 10px;font-size:13px;font-family:inherit;cursor:pointer">' + (isOn() ? '🔕 關閉' : '🔔 開啟') + '</button></div>';
     }else{
-      html += '<div style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px">⏰ 預約提醒（還有 ' + minsLeft(pending[0]) + ' 分鐘）</div>';
+      html += '<div class="rr-drag" style="font-size:13px;color:#b45309;font-weight:700;margin-bottom:10px;cursor:grab;touch-action:none;user-select:none">⏰ 預約提醒（還有 ' + minsLeft(pending[0]) + ' 分鐘）</div>';
       pending.forEach(function(s, i){ html += slotHtml(s, true, i === 0); });
     }
     html += '<button id="roman-remind-ok" style="margin-top:' + (manual ? 12 : 18) + 'px;width:100%;padding:' + (manual ? 9 : 12) + 'px;border:0;border-radius:10px;background:var(--primary,#111);color:var(--on-primary,#fff);font-size:' + (manual ? 17 : 16) + 'px;font-weight:700;font-family:inherit;cursor:pointer">知道了</button></div>';
     box.innerHTML = html;
+    var card = box.firstElementChild; applyPos(card); clampPos(card); bindDrag(card);
     bindArrive(box);
     box.querySelector('#roman-remind-ok').onclick = closeBox;
     var tg = box.querySelector('#roman-remind-toggle');
