@@ -170,6 +170,45 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 })();
 </script>
 <!-- roman-blacklist:end -->
+<!-- roman-board-live:start -->
+<script>
+// 預約總覽：LINE / 預約管理有新預約時，自動更新班表文字（沒有未存檔的修改才會自動換；有的話提示）
+(function(){
+  var URL_=/github\.io$/.test(location.hostname)?'https://roman-schedule.yunyunspa.workers.dev/api/roman':'/api/roman';
+  var last=null, warned='';
+  var desc=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
+  function ta(){return document.getElementById('scheduleInput');}
+  function put(el,v){desc.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));}
+  function note(t){var o=document.querySelector('.rb-toast');if(o)o.remove();var d=document.createElement('div');d.className='rb-toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove();},3200);}
+  function rawOf(d){return d&&(d.raw_text||d.raw||(d.current&&d.current.raw))||'';}
+  // 記住程式自己載入 / 存檔時伺服器回的版本；存檔後伺服器補上預約時，直接換成補好的版本
+  var of=window.fetch;
+  window.fetch=function(i,t){
+    var u=typeof i==='string'?i:(i&&i.url)||'', isRoman=/\/api\/roman(\?|$)/.test(u)&&u.indexOf('/api/roman/')<0;
+    var sent=null; if(isRoman&&t&&t.method==='POST'){try{var b=JSON.parse(t.body);sent=b.raw||b.raw_text||null;}catch(e){}}
+    return of.apply(this,arguments).then(function(r){
+      if(isRoman&&r.ok){r.clone().json().then(function(d){var raw=rawOf(d);if(!raw)return;
+        if(sent!==null){var el=ta();if(el&&el.value===sent&&raw!==sent){put(el,raw);note('已把預約管理的預約補進班表');}}
+        last=raw;}).catch(function(){});}
+      return r;
+    });
+  };
+  function poll(){
+    if(document.hidden)return;
+    of(URL_+'?t='+Date.now(),{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(d){
+      var raw=rawOf(d); if(!raw)return;
+      if(last===null){last=raw;return;}
+      if(raw===last)return;
+      var el=ta();
+      if(el&&el.value===last){put(el,raw);note('班表已更新（有新的預約）');}
+      else if(el&&el.value!==raw&&warned!==raw){warned=raw;note('有新的預約，存檔時會自動合併，或按「從 D1 載入」更新');}
+      last=raw;
+    }).catch(function(){});
+  }
+  setTimeout(poll,4000); setInterval(poll,45000);
+})();
+</script>
+<!-- roman-board-live:end -->
   <div id="root"></div>
 <script>
 /* v405 預約提醒：同一時段有預約時，提前 15 分鐘跳出提醒視窗
