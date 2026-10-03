@@ -176,6 +176,9 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 .rb-clash{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:10001;background:#b42318;color:#fff;border-radius:14px;padding:10px 40px 10px 14px;font-size:13px;line-height:1.55;box-shadow:0 10px 30px rgba(180,35,24,.35)}
 .rb-clash b{display:block;font-size:14px;margin-bottom:2px}
 .rb-clash button{position:absolute;right:8px;top:8px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:15px;line-height:26px;padding:0;cursor:pointer}
+.rb-day{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:10000;background:#b45309;color:#fff;border-radius:14px;padding:10px 40px 10px 14px;font-size:13px;line-height:1.55;box-shadow:0 10px 30px rgba(180,83,9,.35)}
+.rb-day b{display:block;font-size:14px;margin-bottom:2px}
+.rb-day button{position:absolute;right:8px;top:8px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:15px;line-height:26px;padding:0;cursor:pointer}
 .rb-auto{position:fixed;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:9999;border:0;border-radius:999px;padding:5px 11px;font-size:11.5px;background:rgba(24,24,27,.78);color:#fff;cursor:pointer;opacity:.85}
 .rb-auto.off{background:rgba(120,120,128,.55)}
 </style>
@@ -199,7 +202,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     store[siteNow]={last:last,baseVer:baseVer,clean:clean,warned:warned};
     var o=store[cur]||{last:null,baseVer:null,clean:false,warned:''};
     last=o.last;baseVer=o.baseVer;clean=o.clean;warned=o.warned;siteNow=cur;
-    clearTimeout(timer);shownClash='';var b=document.querySelector('.rb-clash');if(b)b.remove();
+    clearTimeout(timer);shownClash='';var b=document.querySelector('.rb-clash');if(b)b.remove();dayWarn(null);
     setTimeout(poll,80);
   }
   setInterval(syncSite,400);
@@ -234,6 +237,18 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     box.querySelector('button').onclick=function(){box.remove();};
     document.body.appendChild(box);
   }
+  // ── 日期不符：預約總覽＝今天、隔天預約總覽＝明天；第一行寫的日期不一樣就提醒（這時客人的預約不會寫進來） ──
+  function md(d){return d?(+d.slice(5,7))+'/'+(+d.slice(8,10)):'';}
+  function dayWarn(d){
+    var box=document.querySelector('.rb-day');
+    if(!d||!d.mismatch){if(box)box.remove();return;}
+    var key=d.day+'|'+d.header; if(box&&box.dataset.k===key)return; if(box)box.remove();
+    box=document.createElement('div');box.className='rb-day';box.dataset.k=key;
+    var next=siteNow!=='太原';
+    box.innerHTML='<b>⚠ 日期不符</b>這裡是 '+md(d.day)+'（'+(next?'明天':'今天')+'）的班表，但第一行寫的是 '+md(d.header)+'。日期對上之前，客人的預約不會寫進這份班表；請改成 '+md(d.day)+' 的班表。<button type="button" aria-label="先隱藏">×</button>';
+    box.querySelector('button').onclick=function(){box.remove();};
+    document.body.appendChild(box);
+  }
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
   // ── 讀到伺服器的版本 ──
@@ -247,7 +262,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
     }else{                                  // 程式載入（從 D1 載入）
       setTimeout(function(){var e=ta();if(e&&e.value===raw){if(v!==null)baseVer=v;clean=true;}},400);
     }
-    last=raw; clashes(d.conflicts); pill();
+    last=raw; clashes(d.conflicts); dayWarn(d); pill();
   }
 
   // ── 攔截班表的讀寫 ──
@@ -268,9 +283,10 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
         t=Object.assign({},t,{body:JSON.stringify(body)});
       }
     }
-    var self=this;
+    var self=this, asked=SITE();
     if(!post&&typeof i==='string')i=withSite(i);
     return of.call(self,i,t).then(function(r){
+      if(!post&&asked!==SITE())return new Response(JSON.stringify({ok:false,success:false,error:'已切換分頁'}),{status:409,headers:{'Content-Type':'application/json'}});
       if(post&&body&&sent!==null&&r.status===409)return conflict(self,i,t,body,sent,r);
       if(r.ok)r.clone().json().then(function(d){took(d,post?sent:null);}).catch(function(){});
       return r;
@@ -334,7 +350,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       if(asked!==SITE())return;              // 讀的途中切換了分頁
       var raw=rawOf(d), v=(d.ver===undefined||d.ver===null)?null:Number(d.ver), el=ta();
       if(!raw){if(last===null){last='';if(baseVer===null)baseVer=v;if(el&&!el.value.trim())clean=true;pill();}return;}
-      clashes(d.conflicts);
+      clashes(d.conflicts); dayWarn(d);
       if(last===null||(last===''&&el&&!el.value.trim())){
         last=raw; if(baseVer===null||v!==null)baseVer=v;
         if(el&&!el.value.trim()){put(el,raw);clean=true;}
@@ -355,7 +371,7 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 })();
 </script>
 <!-- roman-board-live:end -->
-  <script>window.__rbSite="太原";</script><div id="root"></div>
+  <script>window.__rbSite="太原";window.__rbDay=function(o){var n=Date.now()+8*3600e3,h=new Date(n).getUTCHours(),d=new Date(n+((h<6?-1:0)+o)*864e5);return (d.getUTCMonth()+1)+"/"+d.getUTCDate();};</script><div id="root"></div>
 <script>
 /* v405 預約提醒：同一時段有預約時，提前 15 分鐘跳出提醒視窗
    - 班表以頁面上的班表文字為準（localStorage roman_schedule_raw，編輯或從 D1 載入後會自動更新）
@@ -689,7 +705,7 @@ Error generating stack: `+u.message+`
         .fusion-grid{display:grid;grid-template-columns:1fr;gap:16;width:100%;max-width:100%}
         @media(min-width:1024px){ .card{border-radius:20px;padding:20px} .fusion-grid{grid-template-columns:40% 60%} }
         @media(max-width:767px){ .seg{max-width:100%} .seg-btn{font-size:12px} }
-      `}),v("div",{style:{position:"sticky",top:0,zIndex:30,background:"var(--header,rgba(255,255,255,0.92))",backdropFilter:"blur(20px)",borderBottom:"1px solid var(--line,#e4e4e7)",paddingTop:"env(safe-area-inset-top)",width:"100%",maxWidth:"100vw",overflow:"hidden"},children:w("div",{style:{maxWidth:1280,margin:"0 auto",padding:"12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left))",display:"flex",flexDirection:"column",gap:8,width:"100%",boxSizing:"border-box"},children:[w("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",gap:8},children:[w("div",{style:{display:"flex",flexDirection:"column",gap:6,minWidth:0,flex:1},children:[w("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,fontWeight:800,fontSize:20,lineHeight:1.2},children:[v("span",{children:"\uD83D\uDCE6 Roman Data"}),v("span",{className:"badge badge-amber",children:"v402 融合預約回覆版"}),v("span",{className:"badge badge-blue",children:"LINE + D1 + 回覆中控"}),v("span",{className:"badge badge-emerald",style:{display:"inline-flex",alignItems:"center",gap:4},children:"\uD83D\uDCAC 融合版"})]}),v(RomanThemePicker,{})]}),w("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",flexShrink:0},children:[v("div",{id:"syncStatus",className:"badge badge-amber",style:{padding:"6px 12px"},children:h}),w("div",{id:"tabCount",className:"badge badge-zinc",style:{padding:"6px 12px"},children:[In.teachers," 位美容師"]})]})]}),v("div",{style:{maxWidth:420,width:"100%"},children:w("div",{className:"seg",role:"tablist","aria-label":"主分頁","data-flash":y,children:[v("button",{type:"button",role:"tab","aria-selected":s==="overview",className:`seg-btn ${s==="overview"?"active":""}`,onClick:()=>{__sw("overview"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne("切換到 預約總覽","系統")},children:"預約總覽"}),v("button",{type:"button",role:"tab","aria-selected":s==="next",className:`seg-btn ${s==="next"?"active":""}`,onClick:()=>{__sw("next"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne("切換到 隔天預約總覽","系統")},children:"隔天預約總覽"}),w("button",{type:"button",role:"tab","aria-selected":s==="reply",className:`seg-btn ${s==="reply"?"active":""}`,onClick:()=>{__sw("reply"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne(`切換到 回覆中控・${ze.length}空檔`,"系統")},children:["LINE/TG回覆中控 ",v("span",{style:{fontSize:10,marginLeft:4,opacity:0.8},children:ze.length&&s!=="next"?`· ${ze.length}空檔`:""})]})]})})]})}),v("div",{style:{maxWidth:1280,margin:"0 auto",padding:"8px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left))"},children:w("div",{style:{background:"var(--panel,#18181b)",color:"var(--on-panel,#fff)",padding:"10px 12px",borderRadius:12,display:"flex",flexWrap:"wrap",gap:8,justifyContent:"space-between",alignItems:"center",fontSize:10,fontFamily:"monospace"},children:[w("span",{children:["v402-融合版・",t,"・",l?`搜尋:${l}`:"未搜尋",""]}),v("span",{id:"d1LiveBadge",style:{background:"rgba(245,158,11,0.2)",border:"1px solid rgba(245,158,11,0.3)",color:"#fcd34d",padding:"2px 8px",borderRadius:999,whiteSpace:"nowrap"},children:C})]})}),v("div",{style:{maxWidth:1280,margin:"0 auto",padding:"12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left))"},children:s!=="reply"?w("div",{style:{display:"grid",gridTemplateColumns:"1fr",gap:16,alignItems:"start"},className:"grid-main",children:[v("div",{style:{display:"grid",gridTemplateColumns:"1fr",gap:16},className:"left-col",children:w("div",{className:"card",style:{position:"relative"},children:[w("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8},children:[w("div",{style:{fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0},children:[v("span",{children:s==="next"?"\uD83D\uDDD3 隔天班表・即時同步":"\uD83D\uDD04 即時同步控制"}),v("span",{className:"badge badge-dark",style:{fontSize:10},children:"v402"})]}),v("button",{id:"btnToggleControl",onClick:()=>g((p)=>!p),style:{height:32,padding:"0 12px",borderRadius:999,border:"1px solid var(--line,#e4e4e7)",background:"var(--surface,#fff)",fontSize:12,fontWeight:500,cursor:"pointer",flexShrink:0},children:m?"展開面板 ▼":"收合面板 ▲"})]}),!m&&w("div",{id:"controlBody",style:{display:"flex",flexDirection:"column",gap:12},children:[w("div",{children:[w("div",{style:{fontSize:11,color:"var(--muted,#71717a)",marginBottom:6,fontFamily:"monospace",display:"flex",justifyContent:"space-between"},children:[v("span",{children:"班表文字（你喜歡的格式）"}),w("span",{id:"charCount",className:"badge badge-zinc",style:{fontSize:9},children:[L," 字"]})]}),v("textarea",{id:"scheduleInput",className:"textarea",style:{height:200},value:e,onChange:(p)=>n(p.target.value),placeholder:s==="next"?`隔天的班表貼這裡（第一行可寫日期，例如 10/5）
+      `}),v("div",{style:{position:"sticky",top:0,zIndex:30,background:"var(--header,rgba(255,255,255,0.92))",backdropFilter:"blur(20px)",borderBottom:"1px solid var(--line,#e4e4e7)",paddingTop:"env(safe-area-inset-top)",width:"100%",maxWidth:"100vw",overflow:"hidden"},children:w("div",{style:{maxWidth:1280,margin:"0 auto",padding:"12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left))",display:"flex",flexDirection:"column",gap:8,width:"100%",boxSizing:"border-box"},children:[w("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",gap:8},children:[w("div",{style:{display:"flex",flexDirection:"column",gap:6,minWidth:0,flex:1},children:[w("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,fontWeight:800,fontSize:20,lineHeight:1.2},children:[v("span",{children:"\uD83D\uDCE6 Roman Data"}),v("span",{className:"badge badge-amber",children:"v402 融合預約回覆版"}),v("span",{className:"badge badge-blue",children:"LINE + D1 + 回覆中控"}),v("span",{className:"badge badge-emerald",style:{display:"inline-flex",alignItems:"center",gap:4},children:"\uD83D\uDCAC 融合版"})]}),v(RomanThemePicker,{})]}),w("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",flexShrink:0},children:[v("div",{id:"syncStatus",className:"badge badge-amber",style:{padding:"6px 12px"},children:h}),w("div",{id:"tabCount",className:"badge badge-zinc",style:{padding:"6px 12px"},children:[In.teachers," 位美容師"]})]})]}),v("div",{style:{maxWidth:420,width:"100%"},children:w("div",{className:"seg",role:"tablist","aria-label":"主分頁","data-flash":y,children:[v("button",{type:"button",role:"tab","aria-selected":s==="overview",className:`seg-btn ${s==="overview"?"active":""}`,onClick:()=>{__sw("overview"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne("切換到 預約總覽","系統")},children:"預約總覽"}),v("button",{type:"button",role:"tab","aria-selected":s==="next",className:`seg-btn ${s==="next"?"active":""}`,onClick:()=>{__sw("next"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne("切換到 隔天預約總覽","系統")},children:"隔天預約總覽"}),w("button",{type:"button",role:"tab","aria-selected":s==="reply",className:`seg-btn ${s==="reply"?"active":""}`,onClick:()=>{__sw("reply"),P((p)=>p+1),window.scrollTo({top:0,behavior:"smooth"}),ne(`切換到 回覆中控・${ze.length}空檔`,"系統")},children:["LINE/TG回覆中控 ",v("span",{style:{fontSize:10,marginLeft:4,opacity:0.8},children:ze.length&&s!=="next"?`· ${ze.length}空檔`:""})]})]})})]})}),v("div",{style:{maxWidth:1280,margin:"0 auto",padding:"8px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left))"},children:w("div",{style:{background:"var(--panel,#18181b)",color:"var(--on-panel,#fff)",padding:"10px 12px",borderRadius:12,display:"flex",flexWrap:"wrap",gap:8,justifyContent:"space-between",alignItems:"center",fontSize:10,fontFamily:"monospace"},children:[w("span",{children:["v402-融合版・",t,"・",l?`搜尋:${l}`:"未搜尋",""]}),v("span",{id:"d1LiveBadge",style:{background:"rgba(245,158,11,0.2)",border:"1px solid rgba(245,158,11,0.3)",color:"#fcd34d",padding:"2px 8px",borderRadius:999,whiteSpace:"nowrap"},children:C})]})}),v("div",{style:{maxWidth:1280,margin:"0 auto",padding:"12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left))"},children:s!=="reply"?w("div",{style:{display:"grid",gridTemplateColumns:"1fr",gap:16,alignItems:"start"},className:"grid-main",children:[v("div",{style:{display:"grid",gridTemplateColumns:"1fr",gap:16},className:"left-col",children:w("div",{className:"card",style:{position:"relative"},children:[w("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8},children:[w("div",{style:{fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0},children:[v("span",{children:s==="next"?"\uD83D\uDDD3 隔天班表・"+window.__rbDay(1)+"（明天）":"\uD83D\uDD04 即時同步控制・"+window.__rbDay(0)+"（今天）"}),v("span",{className:"badge badge-dark",style:{fontSize:10},children:"v402"})]}),v("button",{id:"btnToggleControl",onClick:()=>g((p)=>!p),style:{height:32,padding:"0 12px",borderRadius:999,border:"1px solid var(--line,#e4e4e7)",background:"var(--surface,#fff)",fontSize:12,fontWeight:500,cursor:"pointer",flexShrink:0},children:m?"展開面板 ▼":"收合面板 ▲"})]}),!m&&w("div",{id:"controlBody",style:{display:"flex",flexDirection:"column",gap:12},children:[w("div",{children:[w("div",{style:{fontSize:11,color:"var(--muted,#71717a)",marginBottom:6,fontFamily:"monospace",display:"flex",justifyContent:"space-between"},children:[v("span",{children:"班表文字（你喜歡的格式）"}),w("span",{id:"charCount",className:"badge badge-zinc",style:{fontSize:9},children:[L," 字"]})]}),v("textarea",{id:"scheduleInput",className:"textarea",style:{height:200},value:e,onChange:(p)=>n(p.target.value),placeholder:s==="next"?`隔天的班表貼這裡（第一行可寫日期，例如 10/5）
 小野11-19太原407
 11
 ...`:`小野11-19太原407

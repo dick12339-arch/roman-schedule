@@ -1,3 +1,4 @@
+// v409: 班表日期由分頁決定（今天 / 明天），第一行日期不符就不寫入預約
 // v408-next-day: 支援隔天班表（site=太原_隔天）
 // v407-safe-save: 存檔帶版本號、補線上預約、撞時段提醒（與 Roman OS 共用 board 規則）
 // roman worker v402 - 融合預約回覆版・based on new html upload - lower case
@@ -79,7 +80,28 @@ function parseBoard(raw) {
   return { lines, blocks };
 }
 
-// 班表是哪一天（營業日）
+// 班表第一行寫的日期（沒寫 → null）
+function headerDate(raw, now = Date.now()) {
+  const first = String(raw || "").split(/-{3,}/)[0] || "";
+  const tw = new Date(now + 8 * 3600000);
+  const mt = first.match(/(\d{1,2})[/／.](\d{1,2})/);
+  if (!mt) return null;
+  const mo = +mt[1], d = +mt[2];
+  if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) return null;
+  let best = null;
+  for (const y of [tw.getUTCFullYear() - 1, tw.getUTCFullYear(), tw.getUTCFullYear() + 1]) {
+    const c = Date.UTC(y, mo - 1, d);
+    if (best === null || Math.abs(c - tw) < Math.abs(best - tw)) best = c;
+  }
+  return new Date(best).toISOString().slice(0, 10);
+}
+// 營業日（凌晨 6 點前算前一天）＋ offset 天
+function bizDay(offset = 0, now = Date.now()) {
+  const tw = new Date(now + 8 * 3600000);
+  return new Date(now + 8 * 3600000 + ((tw.getUTCHours() < 6 ? -1 : 0) + offset) * 86400000).toISOString().slice(0, 10);
+}
+
+// 班表是哪一天（營業日）：舊的判斷法（第一行有日期就用它）
 function boardDate(raw, now = Date.now(), offset = 0) {
   const first = String(raw || "").split(/-{3,}/)[0] || "";
   const tw = new Date(now + 8 * 3600000);
@@ -224,6 +246,12 @@ const BOARD_SITE = "太原";
 const NEXT_SITE = "太原_隔天";
 const BOARD_SITES = [BOARD_SITE, NEXT_SITE];
 const siteOffset = (site) => (site === NEXT_SITE ? 1 : 0);
+// 每份班表是哪一天，由分頁決定：預約總覽＝今天、隔天預約總覽＝明天（營業日）
+// 第一行寫的日期跟這天不一樣 → 視為「日期不符」：不寫入預約、不擋客人預約，畫面提醒員工換成正確的班表
+function boardInfo(raw, site = BOARD_SITE, now = Date.now()) {
+  const day = bizDay(siteOffset(site), now), header = headerDate(raw, now);
+  return { day, header, mismatch: !!(header && header !== day) };
+}
 const TS = "strftime('%Y-%m-%d %H:%M:%f','now')";   // 記到毫秒，避免同一秒內兩次寫入分不出先後
 async function ensureBoardTables(DB) {
   await DB.batch([
@@ -294,7 +322,9 @@ async function boardBookings(DB, date) {
 async function withBookings(DB, raw, site = BOARD_SITE) {
   try {
     if (!raw || raw.trim().length < 2) return raw;
-    const { bookings, duty } = await boardBookings(DB, boardDate(raw, Date.now(), siteOffset(site)));
+    const info = boardInfo(raw, site);
+    if (info.mismatch) return raw;   // 日期不符的班表不寫入預約
+    const { bookings, duty } = await boardBookings(DB, info.day);
     return mergeBoard(raw, bookings, duty);
   } catch (e) {
     console.error("merge bookings failed", e);
@@ -322,7 +352,7 @@ async function viewBoard(DB, site = BOARD_SITE) {
   const row = await readCanon(DB, site);
   const v = await readVer(DB, site);
   const raw = row?.raw || "";
-  return { row, raw, ver: v.ver, ver_at: v.at, ver_by: v.by, conflicts: raw ? findConflicts(raw) : [] };
+  return { row, raw, ver: v.ver, ver_at: v.at, ver_by: v.by, conflicts: raw ? findConflicts(raw) : [], ...boardInfo(raw, site) };
 }
 
 // 人存檔（員工、LINE 機器人）
@@ -348,7 +378,7 @@ async function saveBoard(DB, text, opt = {}) {
   let raw = merged;
   try { const s = await syncBoard(DB, site); if (s.raw) raw = s.raw; } catch (_) {}   // 存檔這段時間剛好有新預約
   const v = await readVer(DB, site);
-  return { ok: true, raw, ver: v.ver, ver_at: v.at, ver_by: v.by, conflicts: findConflicts(raw) };
+  return { ok: true, raw, ver: v.ver, ver_at: v.at, ver_by: v.by, conflicts: findConflicts(raw), ...boardInfo(raw, site) };
 }
 
 // 預約有變動時，今天、隔天兩份班表都補一次
@@ -363,7 +393,9 @@ async function boardsFor(DB, date) {
   for (const site of BOARD_SITES) {
     try {
       const row = await readCanon(DB, site);
-      if (row && row.raw && boardDate(row.raw, Date.now(), siteOffset(site)) === date) out.push(row.raw);
+      if (!row || !row.raw) continue;
+      const info = boardInfo(row.raw, site);
+      if (!info.mismatch && info.day === date) out.push(row.raw);
     } catch (_) {}
   }
   return out;
@@ -479,7 +511,7 @@ export default {
         // 讀取時順便補上線上預約，附版本號 ver 與撞時段 conflicts
         const site = BOARD_SITES.includes(url.searchParams.get('site')) ? url.searchParams.get('site') : SHARED_SITE;
         const v = await viewBoard(env.ROMAN_DB, site);
-        if(v.raw || site !== SHARED_SITE) return new Response(JSON.stringify({raw_text:v.raw, parsed:[], updated_at:v.row?.updated_at||null, updated_by:v.ver_by||'roman_os', source:v.row?.source||'roman_data', ver:v.ver, ver_at:v.ver_at, ver_by:v.ver_by, conflicts:v.conflicts}),{headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
+        if(v.raw || site !== SHARED_SITE) return new Response(JSON.stringify({raw_text:v.raw, parsed:[], updated_at:v.row?.updated_at||null, updated_by:v.ver_by||'roman_os', source:v.row?.source||'roman_data', ver:v.ver, ver_at:v.ver_at, ver_by:v.ver_by, conflicts:v.conflicts, day:v.day, header:v.header, mismatch:v.mismatch}),{headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
         const r = await readLatestShared(env.ROMAN_DB);
         if(r) return new Response(JSON.stringify(r),{headers:{...cors,'Content-Type':'application/json'}});
         return new Response(JSON.stringify({raw_text:'', parsed:[]}),{headers:{...cors,'Content-Type':'application/json'}});
@@ -513,10 +545,10 @@ export default {
         const site = BOARD_SITES.includes(body.site) ? body.site : SHARED_SITE;   // 今天 / 隔天兩份班表
         const r = await saveBoard(env.ROMAN_DB, raw_text, {site, base:body.base_ver, force:body.force===true, by:ub, source:src});
         if(r.conflict){
-          return new Response(JSON.stringify({success:false, conflict:true, error:'班表剛被別人改過', raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts}),{status:409, headers:{...cors,'Content-Type':'application/json'}});
+          return new Response(JSON.stringify({success:false, conflict:true, error:'班表剛被別人改過', raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts, day:r.day, header:r.header, mismatch:r.mismatch}),{status:409, headers:{...cors,'Content-Type':'application/json'}});
         }
         try{ await env.ROMAN_DB.prepare('INSERT INTO sync_logs (type, source, payload) VALUES (?, ?, ?)').bind('schedule_update', src, raw_text.slice(0,200)).run(); }catch{}
-        return new Response(JSON.stringify({success:true, id, hasD1:true, raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts}),{headers:{...cors,'Content-Type':'application/json'}});
+        return new Response(JSON.stringify({success:true, id, hasD1:true, raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts, day:r.day, header:r.header, mismatch:r.mismatch}),{headers:{...cors,'Content-Type':'application/json'}});
       }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
     }
 
@@ -559,6 +591,6 @@ export default {
       return servePage(cors);
     }
 
-    return new Response('Roman Worker v408 OK - /api/schedule /webhook/line',{headers:cors});
+    return new Response('Roman Worker v409 OK - /api/schedule /webhook/line',{headers:cors});
   }
 };
