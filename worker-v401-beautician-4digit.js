@@ -1,3 +1,4 @@
+// v410: 同一筆存檔的版本號與內容同時寫入
 // v409: 班表日期由分頁決定（今天 / 明天），第一行日期不符就不寫入預約
 // v408-next-day: 支援隔天班表（site=太原_隔天）
 // v407-safe-save: 存檔帶版本號、補線上預約、撞時段提醒（與 Roman OS 共用 board 規則）
@@ -282,7 +283,7 @@ async function readCanon(DB, site = BOARD_SITE) {
 async function readVer(DB, site = BOARD_SITE) {
   try {
     const r = await DB.prepare("SELECT ver, updated_at, by FROM roman_board_ver WHERE id = ?1").bind(site).first();
-    if (r) return { ver: Number(r.ver) || 0, at: r.updated_at || null, by: r.by || null };
+    if (r) return { ver: Number(r.ver) || 0, at: r.updated_at || null, by: r.by ? String(r.by).split("#")[0] : null };
   } catch (_) {}
   return { ver: 0, at: null, by: null };
 }
@@ -366,14 +367,18 @@ async function saveBoard(DB, text, opt = {}) {
   const check = hasBase && !opt.force;
   const conflict = async () => { const v = await viewBoard(DB, site); return { ok: false, conflict: true, ...v, row: undefined }; };
   if (check && Number(opt.base) !== (await readVer(DB, site)).ver) return conflict();
-  const q = check
-    ? DB.prepare(`UPDATE roman_board_ver SET ver = ver + 1, updated_at = ${TS}, by = ?3 WHERE id = ?1 AND ver = ?2`).bind(site, Number(opt.base), by)
-    : DB.prepare(`UPDATE roman_board_ver SET ver = ver + 1, updated_at = ${TS}, by = ?2 WHERE id = ?1`).bind(site, by);
-  const bump = await q.run();
-  if (check && !(bump.meta && bump.meta.changes)) return conflict();   // 同一瞬間有人搶先存
   const merged = await withBookings(DB, text, site);
-  await DB.prepare(`INSERT INTO roman_data (id, raw, site, updated_at) VALUES (?1, ?2, ?1, ${TS}) ON CONFLICT(id) DO UPDATE SET raw = ?2, site = ?1, updated_at = ${TS}`)
-    .bind(site, merged).run();
+  // 版本號 +1 和班表內容在同一個交易裡寫入：別人不會讀到「版本已更新、內容還是舊的」
+  // 有帶 base 時，只有版本號還是 base 才寫（用這次存檔的記號確認是自己搶到的）
+  const tag = by + "#" + Math.random().toString(36).slice(2, 10);
+  await DB.prepare(`INSERT OR IGNORE INTO roman_data (id, raw, site, updated_at) VALUES (?1, '', ?1, ${TS})`).bind(site).run();
+  const res = await DB.batch([
+    check
+      ? DB.prepare(`UPDATE roman_board_ver SET ver = ver + 1, updated_at = ${TS}, by = ?3 WHERE id = ?1 AND ver = ?2`).bind(site, Number(opt.base), tag)
+      : DB.prepare(`UPDATE roman_board_ver SET ver = ver + 1, updated_at = ${TS}, by = ?2 WHERE id = ?1`).bind(site, tag),
+    DB.prepare(`UPDATE roman_data SET raw = ?2, site = ?1, updated_at = ${TS} WHERE id = ?1 AND (SELECT by FROM roman_board_ver WHERE id = ?1) = ?3`).bind(site, merged, tag),
+  ]);
+  if (!(res[1].meta && res[1].meta.changes)) return conflict();   // 同一瞬間有人搶先存
   await copyToHistory(DB, merged, by, source);
   let raw = merged;
   try { const s = await syncBoard(DB, site); if (s.raw) raw = s.raw; } catch (_) {}   // 存檔這段時間剛好有新預約
@@ -591,6 +596,6 @@ export default {
       return servePage(cors);
     }
 
-    return new Response('Roman Worker v409 OK - /api/schedule /webhook/line',{headers:cors});
+    return new Response('Roman Worker v410 OK - /api/schedule /webhook/line',{headers:cors});
   }
 };

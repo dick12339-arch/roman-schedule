@@ -266,28 +266,38 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   }
 
   // ── 攔截班表的讀寫 ──
-  var of=window.fetch;
+  var of=window.fetch, postQ=Promise.resolve();
   window.fetch=function(i,t){
     var u=typeof i==='string'?i:(i&&i.url)||'';
     if(!API_RE.test(u)||u.indexOf('/api/roman/')>=0)return of.apply(this,arguments);
     syncSite();
-    var post=!!(t&&String(t.method||'').toUpperCase()==='POST'), body=null, sent=null;
-    if(post){
-      try{body=JSON.parse(t.body);sent=body.raw||body.raw_text||null;}catch(e){}
-      if(body&&sent!==null){
-        if(handled&&handled.sent===sent&&Date.now()-handled.t<15000)   // 程式會用第二個網址重送，同一份不重複問
-          return Promise.resolve(new Response(handled.body,{status:handled.status,headers:{'Content-Type':'application/json'}}));
-        if(baseVer!==null&&body.base_ver===undefined)body.base_ver=baseVer;
-        body.updated_by=body.updated_by==='auto'?WHO+'_auto':WHO;
-        body.site=body.id=SITE();
-        t=Object.assign({},t,{body:JSON.stringify(body)});
-      }
-    }
     var self=this, asked=SITE();
+    var post=!!(t&&String(t.method||'').toUpperCase()==='POST'), body=null, sent=null;
+    if(post){try{body=JSON.parse(t.body);sent=body.raw||body.raw_text||null;}catch(e){}}
+    if(post&&body&&sent!==null){
+      if(handled&&handled.sent===sent&&Date.now()-handled.t<15000)   // 程式會用第二個網址重送，同一份不重複問
+        return Promise.resolve(new Response(handled.body,{status:handled.status,headers:{'Content-Type':'application/json'}}));
+      // 同一台裝置的存檔排隊一次一筆，每筆送出時才帶最新的版本號（自動同步和手動同步同時按，也不會自己跟自己衝突）
+      var upd=body.updated_by==='auto'?WHO+'_auto':WHO;
+      var run=function(){
+        var mine=SITE()===asked;
+        if(mine&&sent===last&&baseVer!==null)   // 跟剛存好的一樣，不用再存
+          return new Response(JSON.stringify({ok:true,success:true,raw_text:last,raw:last,ver:baseVer}),{status:200,headers:{'Content-Type':'application/json'}});
+        var b=Object.assign({},body,{updated_by:upd,site:asked,id:asked});
+        var bv=mine?baseVer:(store[asked]&&store[asked].baseVer);
+        if(bv!==null&&bv!==undefined&&body.base_ver===undefined)b.base_ver=bv;
+        var t2=Object.assign({},t,{body:JSON.stringify(b)});
+        return of.call(self,i,t2).then(function(r){
+          if(r.status===409)return conflict(self,i,t2,b,sent,r);
+          if(!r.ok)return r;
+          return r.clone().json().then(function(d){if(SITE()===asked)took(d,sent);return r;},function(){return r;});
+        });
+      };
+      var p=postQ.then(run,run); postQ=p.then(function(){},function(){}); return p;
+    }
     if(!post&&typeof i==='string')i=withSite(i);
     return of.call(self,i,t).then(function(r){
       if(!post&&asked!==SITE())return new Response(JSON.stringify({ok:false,success:false,error:'已切換分頁'}),{status:409,headers:{'Content-Type':'application/json'}});
-      if(post&&body&&sent!==null&&r.status===409)return conflict(self,i,t,body,sent,r);
       if(r.ok)r.clone().json().then(function(d){took(d,post?sent:null);}).catch(function(){});
       return r;
     });
@@ -299,9 +309,8 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
       if(ok){
         body.force=true;
         return of.call(self,i,Object.assign({},t,{body:JSON.stringify(body)})).then(function(r2){
-          r2.clone().text().then(function(txt){handled={sent:sent,t:Date.now(),status:r2.status,body:txt};
-            try{if(r2.ok)took(JSON.parse(txt),sent);}catch(e){}});
-          return r2;
+          return r2.clone().text().then(function(txt){handled={sent:sent,t:Date.now(),status:r2.status,body:txt};
+            try{if(r2.ok)took(JSON.parse(txt),sent);}catch(e){}return r2;},function(){return r2;});
         });
       }
       copy(sent);
