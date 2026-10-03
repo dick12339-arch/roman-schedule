@@ -1,3 +1,4 @@
+// v408-next-day: 支援隔天班表（site=太原_隔天）
 // v407-safe-save: 存檔帶版本號、補線上預約、撞時段提醒（與 Roman OS 共用 board 規則）
 // roman worker v402 - 融合預約回覆版・based on new html upload - lower case
 // v403-shared-d1: 與 Roman OS (roman-os.pages.dev /api/roman) 共用同一個 D1 (8719bcb8)
@@ -42,6 +43,8 @@ function parseTok(e) {
   return null;
 }
 function headerName(u) {
+  const own = u.match(/^(.+?)預約$/);   // 預約系統自己補上的段落（美容師沒有班表時）：「小美預約」
+  if (own && !/\d/.test(own[1])) return own[1].trim();
   let c = u.match(/^(.+?)(\d{3,4}|\d{1,2}(?:[:：]\d{1,2})?)\s*[-—~至]+\s*(\d{3,4}|\d{1,2}(?:[:：]\d{1,2})?)(.*)$/);
   if (c) return c[1].trim();
   c = u.match(/^(.+?)(\d{3,4})(.*)$/);
@@ -77,7 +80,7 @@ function parseBoard(raw) {
 }
 
 // 班表是哪一天（營業日）
-function boardDate(raw, now = Date.now()) {
+function boardDate(raw, now = Date.now(), offset = 0) {
   const first = String(raw || "").split(/-{3,}/)[0] || "";
   const tw = new Date(now + 8 * 3600000);
   const mt = first.match(/(\d{1,2})[/／.](\d{1,2})/);
@@ -92,7 +95,7 @@ function boardDate(raw, now = Date.now()) {
       return new Date(best).toISOString().slice(0, 10);
     }
   }
-  return todayTW(tw.getUTCHours() < 6 ? -1 : 0);
+  return todayTW((tw.getUTCHours() < 6 ? -1 : 0) + offset);
 }
 
 // 班表上已經有客人（或不排）的時段 → { 美容師: [營業日分鐘…] }，預約系統寫進去的不算（那些本來就在預約裡）
@@ -217,6 +220,10 @@ function findConflicts(raw) {
 // 版本號：roman_board_ver.ver 只在「人」存檔時 +1（員工、LINE 機器人）；預約系統補預約不算，
 //         所以員工存檔時帶著自己載入的版本號，伺服器就能分辨「別人改過內容」還是「只是多了預約」。
 const BOARD_SITE = "太原";
+// 隔天預約總覽：另一份班表（羅曼資料區中間的分頁），沒寫日期時當作明天；客人預約明天的時段寫進這份
+const NEXT_SITE = "太原_隔天";
+const BOARD_SITES = [BOARD_SITE, NEXT_SITE];
+const siteOffset = (site) => (site === NEXT_SITE ? 1 : 0);
 const TS = "strftime('%Y-%m-%d %H:%M:%f','now')";   // 記到毫秒，避免同一秒內兩次寫入分不出先後
 async function ensureBoardTables(DB) {
   await DB.batch([
@@ -242,7 +249,7 @@ async function readBoard(DB, site = BOARD_SITE) {
 async function readCanon(DB, site = BOARD_SITE) {
   const r = await DB.prepare("SELECT id, site, raw, updated_at FROM roman_data WHERE id = ?1").bind(site).first();
   if (r && r.raw) return { ...r, source: "roman_data" };
-  return readBoard(DB, site);
+  return site === BOARD_SITE ? readBoard(DB, site) : null;
 }
 async function readVer(DB, site = BOARD_SITE) {
   try {
@@ -284,10 +291,10 @@ async function boardBookings(DB, date) {
     return { bookings: [], duty: {} };   // 預約系統的資料表還沒建立
   }
 }
-async function withBookings(DB, raw) {
+async function withBookings(DB, raw, site = BOARD_SITE) {
   try {
     if (!raw || raw.trim().length < 2) return raw;
-    const { bookings, duty } = await boardBookings(DB, boardDate(raw));
+    const { bookings, duty } = await boardBookings(DB, boardDate(raw, Date.now(), siteOffset(site)));
     return mergeBoard(raw, bookings, duty);
   } catch (e) {
     console.error("merge bookings failed", e);
@@ -301,7 +308,7 @@ async function syncBoard(DB, site = BOARD_SITE) {
   for (let i = 0; i < 4; i++) {
     const row = await readCanon(DB, site);
     if (!row || !row.raw || row.raw.trim().length < 2) return { raw: row?.raw || "", changed: false, row };
-    const merged = await withBookings(DB, row.raw);
+    const merged = await withBookings(DB, row.raw, site);
     if (merged === row.raw) return { raw: merged, changed: false, row };
     if (await casWrite(DB, site, row.raw, merged, "booking_sync", "booking_sync")) return { raw: merged, changed: true, row };
   }
@@ -334,7 +341,7 @@ async function saveBoard(DB, text, opt = {}) {
     : DB.prepare(`UPDATE roman_board_ver SET ver = ver + 1, updated_at = ${TS}, by = ?2 WHERE id = ?1`).bind(site, by);
   const bump = await q.run();
   if (check && !(bump.meta && bump.meta.changes)) return conflict();   // 同一瞬間有人搶先存
-  const merged = await withBookings(DB, text);
+  const merged = await withBookings(DB, text, site);
   await DB.prepare(`INSERT INTO roman_data (id, raw, site, updated_at) VALUES (?1, ?2, ?1, ${TS}) ON CONFLICT(id) DO UPDATE SET raw = ?2, site = ?1, updated_at = ${TS}`)
     .bind(site, merged).run();
   await copyToHistory(DB, merged, by, source);
@@ -342,6 +349,32 @@ async function saveBoard(DB, text, opt = {}) {
   try { const s = await syncBoard(DB, site); if (s.raw) raw = s.raw; } catch (_) {}   // 存檔這段時間剛好有新預約
   const v = await readVer(DB, site);
   return { ok: true, raw, ver: v.ver, ver_at: v.at, ver_by: v.by, conflicts: findConflicts(raw) };
+}
+
+// 預約有變動時，今天、隔天兩份班表都補一次
+async function syncAll(DB) {
+  for (const site of BOARD_SITES) {
+    try { await syncBoard(DB, site); } catch (e) { console.error("board sync failed", site, e); }
+  }
+}
+// 某一天（營業日）的班表文字：今天、隔天兩份裡日期對得上的
+async function boardsFor(DB, date) {
+  const out = [];
+  for (const site of BOARD_SITES) {
+    try {
+      const row = await readCanon(DB, site);
+      if (row && row.raw && boardDate(row.raw, Date.now(), siteOffset(site)) === date) out.push(row.raw);
+    } catch (_) {}
+  }
+  return out;
+}
+// 某一天班表上已經有客人（或不排）的時段 → { 美容師: [營業日分鐘…] }
+async function boardBusyFor(DB, date) {
+  const out = {};
+  for (const raw of await boardsFor(DB, date)) {
+    for (const [n, list] of Object.entries(boardBusy(raw))) (out[n] ||= []).push(...list);
+  }
+  return out;
 }
 // ===== board-shared:end =====
 
@@ -444,8 +477,9 @@ export default {
       try{
         if(!hasD1) return new Response(JSON.stringify({raw_text: memoryStore.raw_text, parsed:[], updated_at: memoryStore.updated_at, updated_by:'memory', warning:'D1未綁定'}),{headers:{...cors,'Content-Type':'application/json'}});
         // 讀取時順便補上線上預約，附版本號 ver 與撞時段 conflicts
-        const v = await viewBoard(env.ROMAN_DB, SHARED_SITE);
-        if(v.raw) return new Response(JSON.stringify({raw_text:v.raw, parsed:[], updated_at:v.row?.updated_at||null, updated_by:v.ver_by||'roman_os', source:v.row?.source||'roman_data', ver:v.ver, ver_at:v.ver_at, ver_by:v.ver_by, conflicts:v.conflicts}),{headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
+        const site = BOARD_SITES.includes(url.searchParams.get('site')) ? url.searchParams.get('site') : SHARED_SITE;
+        const v = await viewBoard(env.ROMAN_DB, site);
+        if(v.raw || site !== SHARED_SITE) return new Response(JSON.stringify({raw_text:v.raw, parsed:[], updated_at:v.row?.updated_at||null, updated_by:v.ver_by||'roman_os', source:v.row?.source||'roman_data', ver:v.ver, ver_at:v.ver_at, ver_by:v.ver_by, conflicts:v.conflicts}),{headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
         const r = await readLatestShared(env.ROMAN_DB);
         if(r) return new Response(JSON.stringify(r),{headers:{...cors,'Content-Type':'application/json'}});
         return new Response(JSON.stringify({raw_text:'', parsed:[]}),{headers:{...cors,'Content-Type':'application/json'}});
@@ -476,7 +510,8 @@ export default {
         const ub = String(body.updated_by||'v402_secure').slice(0,100);
         const src = String(body.source||'v402_secure').slice(0,100);
         // 跟 Roman OS 同一套存檔規則：帶 base_ver 檢查有沒有別人先存、補上線上預約、回報撞時段
-        const r = await saveBoard(env.ROMAN_DB, raw_text, {site:SHARED_SITE, base:body.base_ver, force:body.force===true, by:ub, source:src});
+        const site = BOARD_SITES.includes(body.site) ? body.site : SHARED_SITE;   // 今天 / 隔天兩份班表
+        const r = await saveBoard(env.ROMAN_DB, raw_text, {site, base:body.base_ver, force:body.force===true, by:ub, source:src});
         if(r.conflict){
           return new Response(JSON.stringify({success:false, conflict:true, error:'班表剛被別人改過', raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts}),{status:409, headers:{...cors,'Content-Type':'application/json'}});
         }
@@ -524,6 +559,6 @@ export default {
       return servePage(cors);
     }
 
-    return new Response('Roman Worker v407 OK - /api/schedule /webhook/line',{headers:cors});
+    return new Response('Roman Worker v408 OK - /api/schedule /webhook/line',{headers:cors});
   }
 };
