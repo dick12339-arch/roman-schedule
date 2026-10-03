@@ -171,41 +171,168 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 </script>
 <!-- roman-blacklist:end -->
 <!-- roman-board-live:start -->
+<style>
+.rb-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10000;background:#18181b;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw}
+.rb-clash{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:10001;background:#b42318;color:#fff;border-radius:14px;padding:10px 40px 10px 14px;font-size:13px;line-height:1.55;box-shadow:0 10px 30px rgba(180,35,24,.35)}
+.rb-clash b{display:block;font-size:14px;margin-bottom:2px}
+.rb-clash button{position:absolute;right:8px;top:8px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:15px;line-height:26px;padding:0;cursor:pointer}
+.rb-auto{position:fixed;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:9999;border:0;border-radius:999px;padding:5px 11px;font-size:11.5px;background:rgba(24,24,27,.78);color:#fff;cursor:pointer;opacity:.85}
+.rb-auto.off{background:rgba(120,120,128,.55)}
+</style>
 <script>
-// 預約總覽：LINE / 預約管理有新預約時，自動更新班表文字（沒有未存檔的修改才會自動換；有的話提示）
+// Roman Data 班表文字 ⇄ D1（v2：版本號、撞時段提醒、自動同步）
+// 1) 存檔帶著「載入時的版本號」，中間有別人存過 → 讓你選「覆蓋」或「載入最新」，不再默默蓋掉
+// 2) 存檔或讀取時，同一時段同時有 LINE/預約管理的客人和手寫客人 → 紅色提醒
+// 3) 停止打字 3 秒自動同步（左下角可關閉）
+// 4) 有新的預約、別人存檔 → 沒有未存的修改就自動換成最新版
 (function(){
-  var URL_=/github\.io$/.test(location.hostname)?'https://roman-schedule.yunyunspa.workers.dev/api/roman':'/api/roman';
-  var last=null, warned='';
+  var GH=/github\.io$/.test(location.hostname);
+  var URL_=GH?'https://roman-schedule.yunyunspa.workers.dev/api/schedule':'/api/roman';
+  var API_RE=GH?/\/api\/(roman|schedule)(\?|$)/:/\/api\/roman(\?|$)/;
+  var WHO=GH?'github':'roman_os';
+  var last=null, baseVer=null, clean=false, warned='', handled=null, saving=false, timer=null, quiet=false, shownClash='', alerted={};
+  var auto=true; try{auto=localStorage.getItem('rb_autosave')!=='0';}catch(e){}
   var desc=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
   function ta(){return document.getElementById('scheduleInput');}
-  function put(el,v){desc.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));}
-  function note(t){var o=document.querySelector('.rb-toast');if(o)o.remove();var d=document.createElement('div');d.className='rb-toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove();},3200);}
+  function put(el,v){quiet=true;try{desc.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));}finally{quiet=false;}}
+  function note(t,ms){var o=document.querySelector('.rb-toast');if(o)o.remove();var d=document.createElement('div');d.className='rb-toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove();},ms||3200);}
   function rawOf(d){return d&&(d.raw_text||d.raw||(d.current&&d.current.raw))||'';}
-  // 記住程式自己載入 / 存檔時伺服器回的版本；存檔後伺服器補上預約時，直接換成補好的版本
+  function hm(at){if(!at)return '';var d=new Date(String(at).replace(' ','T')+(/Z|[+-]\d\d:?\d\d$/.test(at)?'':'Z'));return isNaN(d)?'':d.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Taipei'});}
+  function whoLabel(b){b=String(b||'');if(/^roman_os|^os_/.test(b))return 'Roman OS';if(/^github/.test(b))return 'GitHub 版';if(/line/.test(b)||/^U[0-9a-f]{20,}/.test(b))return 'LINE 機器人';return '其他裝置';}
+  function copy(t){try{localStorage.setItem('rb_conflict_backup',t);}catch(e){}
+    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(fb);return;}}catch(e){}fb();
+    function fb(){try{var x=document.createElement('textarea');x.value=t;x.style.position='fixed';x.style.opacity='0';document.body.appendChild(x);x.select();document.execCommand('copy');x.remove();}catch(e){}}}
+
+  // ── 撞時段提醒 ──
+  function clashes(list){
+    list=Array.isArray(list)?list:[];
+    var key=JSON.stringify(list), box=document.querySelector('.rb-clash');
+    if(!list.length){if(box)box.remove();shownClash='';return;}
+    var fresh=list.filter(function(c){var k=c.beautician+'|'+c.time+'|'+c.booking.join()+'|'+c.staff.join();if(alerted[k])return false;alerted[k]=1;return true;});
+    if(fresh.length){
+      alert('⚠ 撞時段！同一時間有兩位客人：\n\n'+fresh.map(function(c){return c.time+' '+c.beautician+'：'+c.booking.join('、')+'（線上預約） ⇄ '+c.staff.join('、')+'（手寫）';}).join('\n')+'\n\n請改掉其中一位的時間，或聯絡客人。');
+    }
+    if(key===shownClash&&box)return;
+    shownClash=key; if(box)box.remove();
+    box=document.createElement('div');box.className='rb-clash';
+    var h='<b>⚠ 撞時段（'+list.length+'）</b>';
+    list.forEach(function(c){h+='<div>'+esc(c.time+' '+c.beautician+'：'+c.booking.join('、')+' ⇄ '+c.staff.join('、'))+'</div>';});
+    box.innerHTML=h+'<button type="button" aria-label="先隱藏">×</button>';
+    box.querySelector('button').onclick=function(){box.remove();};
+    document.body.appendChild(box);
+  }
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+  // ── 讀到伺服器的版本 ──
+  function took(d,sent){
+    var raw=rawOf(d); if(!raw)return;
+    var v=(d.ver===undefined||d.ver===null)?null:Number(d.ver);
+    var el=ta();
+    if(sent!==null){                       // 存檔成功
+      if(el&&el.value===sent&&raw!==sent){put(el,raw);note('已把預約管理的預約補進班表');}
+      if(v!==null)baseVer=v; clean=true;
+    }else{                                  // 程式載入（從 D1 載入）
+      setTimeout(function(){var e=ta();if(e&&e.value===raw){if(v!==null)baseVer=v;clean=true;}},400);
+    }
+    last=raw; clashes(d.conflicts); pill();
+  }
+
+  // ── 攔截班表的讀寫 ──
   var of=window.fetch;
   window.fetch=function(i,t){
-    var u=typeof i==='string'?i:(i&&i.url)||'', isRoman=/\/api\/roman(\?|$)/.test(u)&&u.indexOf('/api/roman/')<0;
-    var sent=null; if(isRoman&&t&&t.method==='POST'){try{var b=JSON.parse(t.body);sent=b.raw||b.raw_text||null;}catch(e){}}
-    return of.apply(this,arguments).then(function(r){
-      if(isRoman&&r.ok){r.clone().json().then(function(d){var raw=rawOf(d);if(!raw)return;
-        if(sent!==null){var el=ta();if(el&&el.value===sent&&raw!==sent){put(el,raw);note('已把預約管理的預約補進班表');}}
-        last=raw;}).catch(function(){});}
+    var u=typeof i==='string'?i:(i&&i.url)||'';
+    if(!API_RE.test(u)||u.indexOf('/api/roman/')>=0)return of.apply(this,arguments);
+    var post=!!(t&&String(t.method||'').toUpperCase()==='POST'), body=null, sent=null;
+    if(post){
+      try{body=JSON.parse(t.body);sent=body.raw||body.raw_text||null;}catch(e){}
+      if(body&&sent!==null){
+        if(handled&&handled.sent===sent&&Date.now()-handled.t<15000)   // 程式會用第二個網址重送，同一份不重複問
+          return Promise.resolve(new Response(handled.body,{status:handled.status,headers:{'Content-Type':'application/json'}}));
+        if(baseVer!==null&&body.base_ver===undefined)body.base_ver=baseVer;
+        body.updated_by=body.updated_by==='auto'?WHO+'_auto':WHO;
+        t=Object.assign({},t,{body:JSON.stringify(body)});
+      }
+    }
+    var self=this;
+    return of.call(self,i,t).then(function(r){
+      if(post&&body&&sent!==null&&r.status===409)return conflict(self,i,t,body,sent,r);
+      if(r.ok)r.clone().json().then(function(d){took(d,post?sent:null);}).catch(function(){});
       return r;
     });
   };
+  function conflict(self,i,t,body,sent,r){
+    return r.clone().json().catch(function(){return {};}).then(function(d){
+      var at=hm(d.ver_at), who=whoLabel(d.ver_by);
+      var ok=confirm('⚠ 班表'+(at?'在 '+at+' ':'')+'被'+who+'改過，你的畫面不是最新版。\n\n按「確定」：用你的版本覆蓋（線上預約會自動保留）\n按「取消」：載入最新版（你的版本會先複製起來，可以貼回來）');
+      if(ok){
+        body.force=true;
+        return of.call(self,i,Object.assign({},t,{body:JSON.stringify(body)})).then(function(r2){
+          r2.clone().text().then(function(txt){handled={sent:sent,t:Date.now(),status:r2.status,body:txt};
+            try{if(r2.ok)took(JSON.parse(txt),sent);}catch(e){}});
+          return r2;
+        });
+      }
+      copy(sent);
+      var el=ta(), raw=rawOf(d);
+      if(el&&raw){put(el,raw);last=raw;}
+      if(d.ver!==undefined&&d.ver!==null)baseVer=Number(d.ver); clean=!!raw;
+      clashes(d.conflicts);
+      note('已載入最新版，你的版本已複製（貼上即可找回）',5000);
+      var txt=JSON.stringify(d);
+      handled={sent:sent,t:Date.now(),status:409,body:txt};
+      return new Response(txt,{status:409,headers:{'Content-Type':'application/json'}});
+    });
+  }
+
+  // ── 停止打字 3 秒自動同步 ──
+  function pill(msg){
+    var b=document.querySelector('.rb-auto');
+    if(!b){b=document.createElement('button');b.type='button';b.className='rb-auto';document.body.appendChild(b);
+      b.onclick=function(){auto=!auto;try{localStorage.setItem('rb_autosave',auto?'1':'0');}catch(e){}pill();note(auto?'已開啟自動同步（停止打字 3 秒後存到 D1）':'已關閉自動同步，請記得按同步');};}
+    b.classList.toggle('off',!auto);
+    if(msg)b.dataset.msg=msg;
+    b.textContent=auto?('⟳ 自動同步'+(b.dataset.msg?'・'+b.dataset.msg:'')):'⟳ 自動同步：關';
+  }
+  document.addEventListener('input',function(e){
+    if(quiet||!e.isTrusted||e.target!==ta())return;
+    clearTimeout(timer); if(auto)timer=setTimeout(autoSave,3000);
+  },true);
+  function autoSave(){
+    var el=ta(); if(!auto||!el)return;
+    var v=el.value;
+    if(v.trim().length<10||v===last)return;
+    if(!clean||baseVer===null){if(warned!=='load'){warned='load';note('畫面不是從 D1 載入的版本，請先按「從 D1 載入」，之後才會自動同步',5000);}return;}
+    if(saving){timer=setTimeout(autoSave,1500);return;}
+    saving=true; pill('存檔中…');
+    window.fetch(URL_,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:v,raw:v,site:'太原',id:'太原',source:'auto_save',updated_by:'auto'})})
+      .then(function(r){pill(r.ok?(hm(new Date().toISOString())+' 已存'):(r.status===409?'等你選擇':'存檔失敗'));})
+      .catch(function(){pill('存檔失敗');})
+      .then(function(){saving=false;});
+  }
+
+  // ── 定時檢查（每 20 秒） ──
   function poll(){
     if(document.hidden)return;
-    of(URL_+'?t='+Date.now(),{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    of(URL_+'?t='+Date.now(),{cache:'no-store',credentials:GH?'omit':'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(d){
       var raw=rawOf(d); if(!raw)return;
-      if(last===null){last=raw;return;}
-      if(raw===last)return;
-      var el=ta();
-      if(el&&el.value===last){put(el,raw);note('班表已更新（有新的預約）');}
-      else if(el&&el.value!==raw&&warned!==raw){warned=raw;note('有新的預約，存檔時會自動合併，或按「從 D1 載入」更新');}
+      var v=(d.ver===undefined||d.ver===null)?null:Number(d.ver), el=ta();
+      clashes(d.conflicts);
+      if(last===null){
+        last=raw; if(baseVer===null)baseVer=v;
+        if(el&&el.value===raw)clean=true;
+        else if(el&&el.value.trim()){note('D1 上的班表跟畫面不同，按「從 D1 載入」看最新版',5000);}
+        pill(); return;
+      }
+      if(raw===last){if(el&&el.value===raw&&v!==null){baseVer=v;clean=true;}return;}
+      var other=v!==null&&baseVer!==null&&v!==baseVer;
+      if(el&&el.value===last){put(el,raw);if(v!==null)baseVer=v;clean=true;note(other?'班表已更新（別人剛存檔）':'班表已更新（有新的預約）');}
+      else if(el&&el.value!==raw&&warned!==raw){warned=raw;note(other?'別人剛改過班表，你存檔時會讓你選擇要覆蓋還是載入':'有新的預約，存檔時會自動合併',5000);}
       last=raw;
     }).catch(function(){});
   }
-  setTimeout(poll,4000); setInterval(poll,45000);
+  setTimeout(poll,1500); setInterval(poll,20000);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)poll();});
+  if(document.body)pill(); else document.addEventListener('DOMContentLoaded',function(){pill();});
 })();
 </script>
 <!-- roman-board-live:end -->
