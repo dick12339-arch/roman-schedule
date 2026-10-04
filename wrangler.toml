@@ -9,7 +9,7 @@ database_name = "roman-schedule-db"
 database_id = "8719bcb8-10e9-4f6e-b6c4-54ccf5a36a91"
 
 [vars]
-version = "v410-atomic-save"
+version = "v411-notify-ping"
 env = "production"
 frontend_version = "v402-fusion-secure-24h-1030fix"
 

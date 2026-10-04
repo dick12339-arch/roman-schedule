@@ -1,3 +1,4 @@
+// v411: 存檔後通知 Roman OS 檢查班表更新通知
 // v410: 同一筆存檔的版本號與內容同時寫入
 // v409: 班表日期由分頁決定（今天 / 明天），第一行日期不符就不寫入預約
 // v408-next-day: 支援隔天班表（site=太原_隔天）
@@ -430,6 +431,12 @@ async function boardBusyFor(DB, date) {
 }
 // ===== board-shared:end =====
 
+// 班表存檔後請 Roman OS 檢查要不要發「班表更新通知」給會員（LINE）；在背景執行，不影響存檔
+const NOTIFY_URL = 'https://roman-os.pages.dev/api/public/booking/board-updated';
+function pingNotify(ctx){
+  const job = fetch(NOTIFY_URL, {method:'POST'}).catch(()=>{});
+  try{ if(ctx && ctx.waitUntil) ctx.waitUntil(job); }catch(e){}
+}
 let memoryStore = { raw_text: '', updated_at: '', updated_by: 'memory' };
 const SHARED_SITE = '太原';
 async function ensureSharedTables(db){
@@ -568,6 +575,7 @@ export default {
           return new Response(JSON.stringify({success:false, conflict:true, error:'班表剛被別人改過', raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts, day:r.day, header:r.header, mismatch:r.mismatch}),{status:409, headers:{...cors,'Content-Type':'application/json'}});
         }
         try{ await env.ROMAN_DB.prepare('INSERT INTO sync_logs (type, source, payload) VALUES (?, ?, ?)').bind('schedule_update', src, raw_text.slice(0,200)).run(); }catch{}
+        pingNotify(ctx);
         return new Response(JSON.stringify({success:true, id, hasD1:true, raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts, day:r.day, header:r.header, mismatch:r.mismatch}),{headers:{...cors,'Content-Type':'application/json'}});
       }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
     }
@@ -587,6 +595,7 @@ export default {
               if(hasD1){
                 const saved = await saveBoard(env.ROMAN_DB, text, {site:SHARED_SITE, by:'line_bot', source:'line_bot'});
                 ev.__clash = saved.conflicts || [];
+                pingNotify(ctx);
                 try{ await env.ROMAN_DB.prepare('INSERT INTO sync_logs (type, source, payload) VALUES (?, ?, ?)').bind('line_update', (ev.source.userId||'line').slice(0,100), text.slice(0,200)).run(); }catch{}
               }else{
                 memoryStore = {raw_text:text, updated_at: new Date().toLocaleString('zh-TW'), updated_by:'line'};
@@ -611,6 +620,6 @@ export default {
       return servePage(cors);
     }
 
-    return new Response('Roman Worker v410 OK - /api/schedule /webhook/line',{headers:cors});
+    return new Response('Roman Worker v411 OK - /api/schedule /webhook/line',{headers:cors});
   }
 };
