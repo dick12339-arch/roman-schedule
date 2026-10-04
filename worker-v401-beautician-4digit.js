@@ -56,6 +56,15 @@ function headerName(u) {
   return "";
 }
 const isSep = (line) => /-{3,}/.test(line);
+// 段落標題的上下班時間：「小美12-22太原702」→ { start:"12:00", end:"22:00" }
+function headerShift(u) {
+  const c = String(u || "").match(/^(.+?)(\d{3,4}|\d{1,2}(?:[:：]\d{1,2})?)\s*[-—~至]+\s*(\d{3,4}|\d{1,2}(?:[:：]\d{1,2})?)/);
+  if (!c) return null;
+  const a = parseTok(c[2]), b = parseTok(c[3]);
+  if (!a || !b) return null;
+  const f = (t) => String(t.h % 24).padStart(2, "0") + ":" + String(t.m).padStart(2, "0");
+  return { start: f(a), end: f(b) };
+}
 
 // 拆成段落：每段記錄美容師名字、標題行、每一個時間行
 function parseBoard(raw) {
@@ -100,6 +109,12 @@ function headerDate(raw, now = Date.now()) {
 function bizDay(offset = 0, now = Date.now()) {
   const tw = new Date(now + 8 * 3600000);
   return new Date(now + 8 * 3600000 + ((tw.getUTCHours() < 6 ? -1 : 0) + offset) * 86400000).toISOString().slice(0, 10);
+}
+
+// 每位美容師的段落：名字、整段不排、上下班、每個時間行（客人可約＝時間行後面沒寫客人、也不是不排）
+function boardBlocks(raw) {
+  const { lines, blocks } = parseBoard(raw);
+  return blocks.filter((b) => b.name).map((b) => ({ name: b.name, offAll: b.offAll, shift: headerShift(lines[b.header].trim()), slots: b.slots }));
 }
 
 // 班表是哪一天（營業日）：舊的判斷法（第一行有日期就用它）
