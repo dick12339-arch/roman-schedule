@@ -1,3 +1,8 @@
+// v412-secure: 資安修補 W-01～W-03
+//   - /api/schedule、/api/roman 的公開讀寫關閉：沒有 SYNC_SECRET 一律拒絕（GitHub 版改走 Roman OS，要輸入 OS 員工密碼）
+//   - 首頁直接導到 GitHub 版
+//   - LINE 機器人只收允許名單（Roman OS 後台 →「LINE 機器人」）裡的人或群組傳的班表，而且內容要像班表
+//   - CORS 只允許完整網址相同的來源
 // v411: 存檔後通知 Roman OS 檢查班表更新通知
 // v410: 同一筆存檔的版本號與內容同時寫入
 // v409: 班表日期由分頁決定（今天 / 明天），第一行日期不符就不寫入預約
@@ -480,13 +485,10 @@ function getCorsHeaders(request){
     'https://dick12339-arch.github.io',
     'https://roman-schedule.yunyunspa.workers.dev',
     'https://roman-schedule-worker.yunyunspa.workers.dev',
-    'http://localhost',
-    'http://127.0.0.1'
   ];
   let allowOrigin = '*';
   if(origin){
-    const ok = allowed.some(a=> origin.startsWith(a)) || origin.includes('github.io') || origin.includes('workers.dev') || origin.includes('localhost');
-    allowOrigin = ok ? origin : 'https://dick12339-arch.github.io';
+    allowOrigin = allowed.includes(origin) ? origin : 'https://dick12339-arch.github.io';   // 完整網址相同才放行
   }
   return {
     'Access-Control-Allow-Origin': allowOrigin,
@@ -506,6 +508,79 @@ async function verifyLineSignature(request, secret, bodyText){
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(bodyText));
   const b64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
   return b64 === signature;
+}
+
+// 固定時間比對（不洩漏時間差）
+async function sameSecret(a, b){
+  if(typeof a!=='string'||typeof b!=='string'||!b) return false;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode('roman-schedule-compare'), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+  const [x, y] = await Promise.all([crypto.subtle.sign('HMAC', key, enc.encode(a)), crypto.subtle.sign('HMAC', key, enc.encode(b))]);
+  const u = new Uint8Array(x), v = new Uint8Array(y); let d = 0;
+  for(let i=0;i<u.length;i++) d |= u[i]^v[i];
+  return d===0;
+}
+// 班表 API 只給有 SYNC_SECRET 的程式用；沒設定 SYNC_SECRET 就整個關閉（不再「沒設就放行」）
+async function syncAuthorized(request, env){
+  const secret = env.SYNC_SECRET || '';
+  if(!secret) return false;
+  const auth = request.headers.get('Authorization') || '';
+  return auth.startsWith('Bearer ') && await sameSecret(auth.slice(7), secret);
+}
+
+// ── LINE 機器人允許名單（資料表跟 Roman OS 共用；欄位要跟 roman-os functions/_lib/linebot.js 一致） ──
+async function ensureLineBotTables(DB){
+  await DB.batch([
+    DB.prepare('CREATE TABLE IF NOT EXISTS line_bot_allow (id TEXT PRIMARY KEY, kind TEXT, label TEXT, created_at INTEGER)'),
+    DB.prepare('CREATE TABLE IF NOT EXISTS line_bot_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, user_id TEXT, group_id TEXT, kind TEXT, name TEXT, preview TEXT, status TEXT, site TEXT)'),
+    DB.prepare('CREATE INDEX IF NOT EXISTS idx_line_bot_log_ts ON line_bot_log(ts)'),
+  ]);
+  // 第一次啟用：把以前用 LINE 更新過班表的人帶進允許名單，原本在用的人不會突然被擋
+  const any = await DB.prepare('SELECT (SELECT COUNT(*) FROM line_bot_allow) a, (SELECT COUNT(*) FROM line_bot_log) l').first();
+  if(any && !any.a && !any.l){
+    try{
+      const r = await DB.prepare("SELECT DISTINCT source FROM sync_logs WHERE type='line_update'").all();
+      const ids = (r.results||[]).map(x=>String(x.source||'')).filter(x=>/^U[0-9a-f]{32}$/.test(x));
+      if(ids.length) await DB.batch(ids.map(id=>DB.prepare("INSERT OR IGNORE INTO line_bot_allow (id, kind, label, created_at) VALUES (?, 'user', '以前用 LINE 更新過班表（自動帶入）', ?)").bind(id, Date.now())));
+    }catch(e){}
+    await DB.prepare("INSERT INTO line_bot_log (ts, status, preview) VALUES (?, 'init', '允許名單啟用')").bind(Date.now()).run();
+  }
+}
+// 傳送者或所在群組在允許名單上？
+async function lineAllowed(DB, src){
+  const ids = [src.userId, src.groupId, src.roomId].filter(Boolean);
+  if(!ids.length) return false;
+  const r = await DB.prepare(`SELECT 1 FROM line_bot_allow WHERE id IN (${ids.map(()=>'?').join(',')}) LIMIT 1`).bind(...ids).first();
+  return !!r;
+}
+// 看起來像班表：至少一段有「美容師＋上下班時間」那一行，而且下面至少有一行時間（例如 1400、1500 王小姐）
+// 只有一行的聊天（「明天 10-12 點會晚到」）、只帶一個時間的訊息都不算
+function looksLikeBoard(text){
+  if(String(text).split('\n').filter(x=>x.trim()).length < 2) return false;
+  try{
+    const bs = boardBlocks(text).filter(b=>b.name && b.shift);
+    return bs.length > 0 && bs.reduce((n,b)=>n + ((b.slots && b.slots.length) || 0), 0) >= 2;   // 整份至少 2 行時間
+  }catch(e){ return false; }
+}
+async function lineName(env, src){
+  if(!env.LINE_CHANNEL_TOKEN || !src.userId) return '';
+  const u = src.groupId ? `https://api.line.me/v2/bot/group/${src.groupId}/member/${src.userId}`
+          : src.roomId ? `https://api.line.me/v2/bot/room/${src.roomId}/member/${src.userId}`
+          : `https://api.line.me/v2/bot/profile/${src.userId}`;
+  try{ const r = await fetch(u, {headers:{Authorization:'Bearer '+env.LINE_CHANNEL_TOKEN}}); if(r.ok) return String((await r.json()).displayName||'').slice(0,40); }catch(e){}
+  return '';
+}
+async function lineLog(DB, src, name, text, status){
+  try{
+    const first = String(text||'').split('\n').map(x=>x.trim()).filter(x=>x && !/^-{3,}$/.test(x)).slice(0,3).join(' / ').slice(0,80);
+    await DB.prepare('INSERT INTO line_bot_log (ts, user_id, group_id, kind, name, preview, status, site) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(Date.now(), src.userId||null, src.groupId||src.roomId||null, src.type||'', name||'', first, status, SHARED_SITE).run();
+    await DB.prepare('DELETE FROM line_bot_log WHERE ts < ?').bind(Date.now() - 90*86400000).run();
+  }catch(e){}
+}
+async function lineReply(env, token, text){
+  if(!env.LINE_CHANNEL_TOKEN || !token) return;
+  try{ await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+env.LINE_CHANNEL_TOKEN},body:JSON.stringify({replyToken:token,messages:[{type:'text',text}]})}); }catch(e){}
 }
 
 // v406: 首頁不再內嵌一份網頁（舊的內嵌版跳脫字元壞掉，瀏覽器打開是空白）。
@@ -532,6 +607,13 @@ export default {
     const SYNC_SECRET = env.SYNC_SECRET || '';
     const LINE_SECRET = env.LINE_CHANNEL_SECRET || '';
 
+    // 班表 API：沒有 SYNC_SECRET 的人一律不能讀寫（GitHub 版已改走 Roman OS 員工登入）
+    if((url.pathname==='/api/schedule' || url.pathname==='/api/roman') && (request.method==='GET' || request.method==='POST')){
+      if(!(await syncAuthorized(request, env))){
+        return new Response(JSON.stringify({success:false, ok:false, error:'這個入口已停用，請用 Roman OS 或 GitHub 版 Roman Data（需要 OS 員工密碼）'}),{status:401, headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
+      }
+    }
+
     if((url.pathname==='/api/schedule' || url.pathname==='/api/roman') && request.method==='GET'){
       try{
         if(!hasD1) return new Response(JSON.stringify({raw_text: memoryStore.raw_text, parsed:[], updated_at: memoryStore.updated_at, updated_by:'memory', warning:'D1未綁定'}),{headers:{...cors,'Content-Type':'application/json'}});
@@ -547,12 +629,6 @@ export default {
 
     if((url.pathname==='/api/schedule' || url.pathname==='/api/roman') && request.method==='POST'){
       try{
-        if(SYNC_SECRET){
-          const auth = request.headers.get('Authorization') || '';
-          if(!auth.startsWith('Bearer ') || auth.slice(7) !== SYNC_SECRET){
-            return new Response(JSON.stringify({error:'unauthorized'}),{status:401, headers:{...cors,'Content-Type':'application/json'}});
-          }
-        }
         const bodyText = await request.text();
         if(bodyText.length > 60000) return new Response(JSON.stringify({error:'payload too large'}),{status:413, headers:cors});
         let body;
@@ -587,14 +663,23 @@ export default {
         if(!ok) return new Response(JSON.stringify({error:'invalid signature'}),{status:403, headers:cors});
         const body = JSON.parse(bodyText);
         const events = body.events || [];
+        if(hasD1) await ensureLineBotTables(env.ROMAN_DB);
         for(let ev of events){
           if(ev.type==='message' && ev.message.type==='text'){
             const text = ev.message.text;
-            if(text.length > 20 && text.length < 10000 && (text.includes('太原') || text.includes('日進') || text.includes('日新') || text.includes('-') || text.includes('---------------') || text.includes('不排'))){
+            if(text.length > 20 && text.length < 10000 && looksLikeBoard(text)){
+              const src = ev.source || {};
+              // 傳送者或群組不在允許名單 → 不存，記一筆讓管理員在 Roman OS 後台按允許
+              if(hasD1 && !(await lineAllowed(env.ROMAN_DB, src))){
+                await lineLog(env.ROMAN_DB, src, await lineName(env, src), text, 'blocked');
+                if(src.type==='user') await lineReply(env, ev.replyToken, '這個 LINE 帳號還沒有權限更新班表，這次的班表沒有存。\n請管理員到 Roman OS 後台 →「LINE 機器人」按「允許此人」，再傳一次。');
+                continue;
+              }
               const id = 'line_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
               if(hasD1){
                 const saved = await saveBoard(env.ROMAN_DB, text, {site:SHARED_SITE, by:'line_bot', source:'line_bot'});
                 ev.__clash = saved.conflicts || [];
+                await lineLog(env.ROMAN_DB, src, await lineName(env, src), text, 'saved');
                 pingNotify(ctx);
                 try{ await env.ROMAN_DB.prepare('INSERT INTO sync_logs (type, source, payload) VALUES (?, ?, ?)').bind('line_update', (ev.source.userId||'line').slice(0,100), text.slice(0,200)).run(); }catch{}
               }else{
@@ -616,10 +701,11 @@ export default {
       }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
     }
 
+    // 首頁：直接導到 GitHub 版（同一份畫面，網址列會是 github.io，登入與連線都走 Roman OS）
     if(url.pathname==='/' || url.pathname==='/index.html'){
-      return servePage(cors);
+      return Response.redirect(PAGE_URL, 302);
     }
 
-    return new Response('Roman Worker v411 OK - /api/schedule /webhook/line',{headers:cors});
+    return new Response('Not found',{status:404, headers:cors});
   }
 };
