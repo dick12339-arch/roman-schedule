@@ -53,8 +53,8 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roman Data</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="https://dick12339-arch.github.io/roman-schedule/icons/favicon-32.png?v=3">
-  <link rel="apple-touch-icon" sizes="180x180" href="https://dick12339-arch.github.io/roman-schedule/icons/apple-touch-icon.png?v=3">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=3">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=3">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Roman Data">
   <meta name="application-name" content="Roman Data">
@@ -76,6 +76,11 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 // 資安修補 W-01／W-02：這頁有客人預約資料，打開要先輸入 Roman OS 員工密碼（跟黑名單共用同一次登入）
 // 班表讀寫一律改走 Roman OS（/api/public/staff/board，帶員工通行證），不再直接打 roman-schedule Worker
 (function(){
+  // GitHub 版已停用：只能從 roman-schedule.yunyunspa.workers.dev 使用
+  if(/github\.io$/.test(location.hostname)){
+    document.documentElement.innerHTML='<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>已停用</title></head><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0d0b;color:#f2ebdd;font-family:sans-serif;text-align:center;padding:16px"><div><h1 style="font-size:20px">這個網址已停用</h1><p style="color:#a69b8b">請改用 Roman OS，或 roman-schedule.yunyunspa.workers.dev</p></div></body>';
+    window.stop&&window.stop(); throw new Error('github.io disabled');
+  }
   var LOCAL=/^(127\.0\.0\.1|localhost)$/.test(location.hostname);
   var OS=(LOCAL?'http://127.0.0.1:8798':'https://roman-os.pages.dev')+'/api/public/staff/';
   var TK='roman_os_staff_token', DK='roman_os_staff_device';

@@ -3,13 +3,18 @@ main = "worker-v401-beautician-4digit.js"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Roman Data 畫面由這個 Worker 自己提供（public/ 資料夾），不再依賴 GitHub Pages
+# 找得到檔案的網址（/、/index.html、/icons/…）直接回檔案；/api/…、/webhook/line 交給 Worker 程式
+[assets]
+directory = "./public"
+
 [[d1_databases]]
 binding = "ROMAN_DB"
 database_name = "roman-schedule-db"
 database_id = "8719bcb8-10e9-4f6e-b6c4-54ccf5a36a91"
 
 [vars]
-version = "v412-secure"
+version = "v413-serve-page"
 env = "production"
 frontend_version = "v402-fusion-secure-24h-1030fix"
 

@@ -1,3 +1,4 @@
+// v413-serve-page: Roman Data 畫面改由這個 Worker 自己提供（public/，Cloudflare 靜態資源），打開要輸入 OS 員工密碼；GitHub 版停用
 // v412-secure: 資安修補 W-01～W-03
 //   - /api/schedule、/api/roman 的公開讀寫關閉：沒有 SYNC_SECRET 一律拒絕（GitHub 版改走 Roman OS，要輸入 OS 員工密碼）
 //   - 首頁直接導到 GitHub 版
@@ -482,13 +483,11 @@ async function readLatestShared(db){
 function getCorsHeaders(request){
   const origin = request.headers.get('Origin') || '';
   const allowed = [
-    'https://dick12339-arch.github.io',
     'https://roman-schedule.yunyunspa.workers.dev',
-    'https://roman-schedule-worker.yunyunspa.workers.dev',
   ];
   let allowOrigin = '*';
   if(origin){
-    allowOrigin = allowed.includes(origin) ? origin : 'https://dick12339-arch.github.io';   // 完整網址相同才放行
+    allowOrigin = allowed.includes(origin) ? origin : 'https://roman-schedule.yunyunspa.workers.dev';   // 完整網址相同才放行
   }
   return {
     'Access-Control-Allow-Origin': allowOrigin,
@@ -583,20 +582,6 @@ async function lineReply(env, token, text){
   try{ await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+env.LINE_CHANNEL_TOKEN},body:JSON.stringify({replyToken:token,messages:[{type:'text',text}]})}); }catch(e){}
 }
 
-// v406: 首頁不再內嵌一份網頁（舊的內嵌版跳脫字元壞掉，瀏覽器打開是空白）。
-// 改成直接提供 GitHub Pages 上的 index.html，兩個網址永遠是同一份、改一次就好。
-const PAGE_URL = 'https://dick12339-arch.github.io/roman-schedule/';
-async function servePage(cors){
-  const secHeaders = {...cors, 'Content-Type':'text/html; charset=utf-8', 'Cache-Control':'no-cache', 'X-Content-Type-Options':'nosniff', 'X-Frame-Options':'DENY', 'Referrer-Policy':'strict-origin-when-cross-origin'};
-  try{
-    const r = await fetch(PAGE_URL + '?v=' + Math.floor(Date.now() / 60000), {cf:{cacheTtl:60, cacheEverything:true}});
-    if(r.ok){
-      const html = await r.text();
-      if(html.includes('id="root"')) return new Response(html, {headers:secHeaders});
-    }
-  }catch(e){}
-  return Response.redirect(PAGE_URL, 302); // 抓不到就直接帶去 GitHub Pages
-}
 
 export default {
   async fetch(request, env, ctx){
@@ -610,7 +595,7 @@ export default {
     // 班表 API：沒有 SYNC_SECRET 的人一律不能讀寫（GitHub 版已改走 Roman OS 員工登入）
     if((url.pathname==='/api/schedule' || url.pathname==='/api/roman') && (request.method==='GET' || request.method==='POST')){
       if(!(await syncAuthorized(request, env))){
-        return new Response(JSON.stringify({success:false, ok:false, error:'這個入口已停用，請用 Roman OS 或 GitHub 版 Roman Data（需要 OS 員工密碼）'}),{status:401, headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
+        return new Response(JSON.stringify({success:false, ok:false, error:'這個入口已停用，請用 Roman OS 或 roman-schedule.yunyunspa.workers.dev 首頁（需要 OS 員工密碼）'}),{status:401, headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
       }
     }
 
@@ -701,10 +686,7 @@ export default {
       }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
     }
 
-    // 首頁：直接導到 GitHub 版（同一份畫面，網址列會是 github.io，登入與連線都走 Roman OS）
-    if(url.pathname==='/' || url.pathname==='/index.html'){
-      return Response.redirect(PAGE_URL, 302);
-    }
+    // 畫面（/、/index.html、/icons/…）由 Cloudflare 靜態資源直接提供，不會進到這裡
 
     return new Response('Not found',{status:404, headers:cors});
   }
