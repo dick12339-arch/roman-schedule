@@ -1,3 +1,4 @@
+// v414: W-08 錯誤訊息不外洩、頁面加 CSP（N-04）
 // v413-serve-page: Roman Data 畫面改由這個 Worker 自己提供（public/，Cloudflare 靜態資源），打開要輸入 OS 員工密碼；GitHub 版停用
 // v412-secure: 資安修補 W-01～W-03
 //   - /api/schedule、/api/roman 的公開讀寫關閉：沒有 SYNC_SECRET 一律拒絕（GitHub 版改走 Roman OS，要輸入 OS 員工密碼）
@@ -609,7 +610,7 @@ export default {
         const r = await readLatestShared(env.ROMAN_DB);
         if(r) return new Response(JSON.stringify(r),{headers:{...cors,'Content-Type':'application/json'}});
         return new Response(JSON.stringify({raw_text:'', parsed:[]}),{headers:{...cors,'Content-Type':'application/json'}});
-      }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
+      }catch(e){ console.error('worker error', e); return new Response(JSON.stringify({error:'處理失敗，請稍後再試'}),{status:500, headers:{...cors,'Content-Type':'application/json'}}); }   // W-08：詳細錯誤只寫 log
     }
 
     if((url.pathname==='/api/schedule' || url.pathname==='/api/roman') && request.method==='POST'){
@@ -638,7 +639,7 @@ export default {
         try{ await env.ROMAN_DB.prepare('INSERT INTO sync_logs (type, source, payload) VALUES (?, ?, ?)').bind('schedule_update', src, raw_text.slice(0,200)).run(); }catch{}
         pingNotify(ctx);
         return new Response(JSON.stringify({success:true, id, hasD1:true, raw_text:r.raw, ver:r.ver, ver_at:r.ver_at, ver_by:r.ver_by, conflicts:r.conflicts, day:r.day, header:r.header, mismatch:r.mismatch}),{headers:{...cors,'Content-Type':'application/json'}});
-      }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
+      }catch(e){ console.error('worker error', e); return new Response(JSON.stringify({error:'處理失敗，請稍後再試'}),{status:500, headers:{...cors,'Content-Type':'application/json'}}); }   // W-08：詳細錯誤只寫 log
     }
 
     if(url.pathname==='/webhook/line' && request.method==='POST'){
@@ -683,7 +684,7 @@ export default {
           }
         }
         return new Response('OK',{headers:cors});
-      }catch(e){ return new Response(JSON.stringify({error:e.message}),{status:500, headers:cors}); }
+      }catch(e){ console.error('worker error', e); return new Response(JSON.stringify({error:'處理失敗，請稍後再試'}),{status:500, headers:{...cors,'Content-Type':'application/json'}}); }   // W-08：詳細錯誤只寫 log
     }
 
     // 畫面（/、/index.html、/icons/…）由 Cloudflare 靜態資源直接提供，不會進到這裡
