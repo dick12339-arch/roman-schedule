@@ -37,6 +37,21 @@ function bizClock(b) { const t = (b + 600) % 1440; return String(Math.floor(t / 
 const TAGS = { line: "(LINE)", os: "(預約)" };
 const TAG_RE = /\((LINE|預約)\)$/;
 const TIME_RE = /^(\d{3,4}|\d{1,2}(?:[:：]\d{1,2})?)\s*(.*)$/;
+// 時間行拆成「時間」與「客人」：先試 4 碼（1730）、再試 3 碼（930），分鐘要小於 60 才算；
+// 不合理（170 → 1:70）就只取前兩碼當整點，剩下算客人：「170-gordon」＝ 17 點、客人「0-gordon」（跟羅曼資料區畫面一致）
+function slotSplit(t) {
+  t = String(t || "");
+  const c = t.match(/^(\d{1,2}[:：]\d{0,2})\s*([\s\S]*)$/);
+  if (c) return [t, c[1], c[2]];
+  const m = t.match(/^(\d+)/);
+  if (!m) return null;
+  const D = m[1];
+  const ok = (s) => { const n = s.length, h = n === 4 ? +s.slice(0, 2) : n === 3 ? +s[0] : +s, mi = n >= 3 ? +s.slice(-2) : 0; return h <= 24 && mi <= 59; };
+  let tok = null;
+  for (const n of [4, 3, 2]) if (D.length >= n && ok(D.slice(0, n))) { tok = D.slice(0, n); break; }
+  if (!tok && D.length === 1) tok = D;
+  return tok ? [t, tok, t.slice(tok.length).replace(/^\s+/, "")] : null;
+}
 
 // 跟羅曼資料區一樣的時間解析
 function parseTok(e) {
@@ -89,7 +104,7 @@ function parseBoard(raw) {
       return;
     }
     cur.last = i;
-    const m = t.match(TIME_RE);
+    const m = slotSplit(t);
     const tm = m && parseTok(m[1]);
     if (!tm) return;
     const customer = (m[2] || "").trim();
