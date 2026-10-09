@@ -1,3 +1,4 @@
+// v415: 班表時間判讀（170-gordon＝17 點、客人 0-gordon）、Roman Data 同步日誌可收合
 // v414: W-08 錯誤訊息不外洩、頁面加 CSP（N-04）
 // v413-serve-page: Roman Data 畫面改由這個 Worker 自己提供（public/，Cloudflare 靜態資源），打開要輸入 OS 員工密碼；GitHub 版停用
 // v412-secure: 資安修補 W-01～W-03
